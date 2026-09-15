@@ -372,8 +372,8 @@ export default function ContactForm() {
               type="button"
               onClick={toggleDebugMode}
               className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${debugMode
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                  : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
+                : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'
                 }`}
             >
               🐞 Debug {debugMode ? 'ON' : 'OFF'}
@@ -672,8 +672,8 @@ export default function ContactForm() {
                       onChange={handleChange}
                       placeholder="John Doe"
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.name
-                          ? 'border-red-500 focus:ring-red-200'
-                          : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        ? 'border-red-500 focus:ring-red-200'
+                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all`}
                     />
 
@@ -707,8 +707,8 @@ export default function ContactForm() {
                       onChange={handleChange}
                       placeholder="john@example.com"
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.email
-                          ? 'border-red-500 focus:ring-red-200'
-                          : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        ? 'border-red-500 focus:ring-red-200'
+                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all`}
                     />
 
@@ -748,8 +748,8 @@ export default function ContactForm() {
                       onChange={handleChange}
                       placeholder="+1 (555) 000-0000"
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.phone
-                          ? 'border-red-500 focus:ring-red-200'
-                          : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        ? 'border-red-500 focus:ring-red-200'
+                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all`}
                     />
 
@@ -781,8 +781,8 @@ export default function ContactForm() {
                       value={formData.subject}
                       onChange={handleChange}
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.subject
-                          ? 'border-red-500 focus:ring-red-200'
-                          : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        ? 'border-red-500 focus:ring-red-200'
+                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all cursor-pointer`}
                     >
                       {subjectOptions.map((opt) => (
