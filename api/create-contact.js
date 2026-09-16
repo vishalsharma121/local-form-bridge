@@ -143,14 +143,93 @@ export default async function handler(req, res) {
             });
         }
 
-        console.log(
-            `✅ [API] Contact ${action} successful`
-        );
+        const contactId = data.id;
+        console.log(`✅ [API] Contact ${action} successful. ID: ${contactId}`);
 
-        console.log(
-            '🆔 [API] HubSpot Contact ID:',
-            data.id
-        );
+        // ------------------------------------------------
+        // OPTIONAL: CREATE COMPANY & ASSOCIATE
+        // ------------------------------------------------
+        let companyId = null;
+        const { companyName, companyDomain, dealName, pipeline, dealStage, dealAmount } = req.body || {};
+
+        if (companyName?.trim() || companyDomain?.trim()) {
+            try {
+                console.log('🏢 [API] Creating Company in HubSpot');
+                const compRes = await fetch('https://api.hubapi.com/crm/v3/objects/companies', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        properties: {
+                            name: (companyName || companyDomain).trim(),
+                            domain: (companyDomain || '').trim(),
+                        },
+                    }),
+                });
+
+                if (compRes.ok) {
+                    const compData = await compRes.json();
+                    companyId = compData.id;
+                    console.log(`✅ [API] Company created: ${companyId}`);
+
+                    // Associate Contact -> Company
+                    await fetch(
+                        `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/companies/${companyId}/contact_to_company`,
+                        { method: 'PUT', headers }
+                    );
+                    console.log('🔗 [API] Associated Contact with Company');
+                }
+            } catch (compErr) {
+                console.warn('⚠️ [API] Company creation/association warning:', compErr.message);
+            }
+        }
+
+        // ------------------------------------------------
+        // OPTIONAL: CREATE DEAL & ASSOCIATE
+        // ------------------------------------------------
+        let dealId = null;
+        const targetDealName = dealName?.trim() || (companyName?.trim() ? `${companyName.trim()} Deal` : null);
+
+        if (targetDealName) {
+            try {
+                console.log('💼 [API] Creating Deal in HubSpot');
+                const dealRes = await fetch('https://api.hubapi.com/crm/v3/objects/deals', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        properties: {
+                            dealname: targetDealName,
+                            pipeline: pipeline || 'default',
+                            dealstage: dealstage || 'appointmentscheduled',
+                            amount: dealAmount ? String(dealAmount) : '0',
+                        },
+                    }),
+                });
+
+                if (dealRes.ok) {
+                    const dealData = await dealRes.json();
+                    dealId = dealData.id;
+                    console.log(`✅ [API] Deal created: ${dealId}`);
+
+                    // Associate Deal -> Contact
+                    await fetch(
+                        `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/contacts/${contactId}/deal_to_contact`,
+                        { method: 'PUT', headers }
+                    );
+                    console.log('🔗 [API] Associated Deal with Contact');
+
+                    // Associate Deal -> Company (if company exists)
+                    if (companyId) {
+                        await fetch(
+                            `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies/${companyId}/deal_to_company`,
+                            { method: 'PUT', headers }
+                        );
+                        console.log('🔗 [API] Associated Deal with Company');
+                    }
+                }
+            } catch (dealErr) {
+                console.warn('⚠️ [API] Deal creation/association warning:', dealErr.message);
+            }
+        }
 
         // Check whether frontend requested debug information
         const debugMode =

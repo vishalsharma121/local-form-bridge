@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Navbar from './Navbar';
 
 export default function ContactForm() {
   const [formData, setFormData] = useState({
@@ -7,6 +8,11 @@ export default function ContactForm() {
     phone: '',
     subject: '',
     message: '',
+    companyName: '',
+    companyDomain: '',
+    dealName: '',
+    dealStage: 'appointmentscheduled',
+    dealAmount: '',
   });
 
   const [errors, setErrors] = useState({});
@@ -309,6 +315,11 @@ export default function ContactForm() {
       phone: '',
       subject: '',
       message: '',
+      companyName: '',
+      companyDomain: '',
+      dealName: '',
+      dealStage: 'appointmentscheduled',
+      dealAmount: '',
     });
 
     setErrors({});
@@ -345,9 +356,11 @@ export default function ContactForm() {
   // --------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex items-center justify-center p-4 sm:p-6 lg:p-12">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col transition-colors">
+      <Navbar />
 
-      <div className="w-full max-w-5xl">
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-12">
+        <div className="w-full max-w-5xl">
 
         {/* ================================
             DEBUG PANEL
@@ -481,7 +494,7 @@ export default function ContactForm() {
               </div>
 
               <h2 className="text-3xl font-bold tracking-tight text-white leading-tight">
-                Let's build something great together
+                Let&apos;s build something great together
               </h2>
 
               <p className="text-slate-400 text-sm leading-relaxed">
@@ -599,7 +612,7 @@ export default function ContactForm() {
                   submitted under{' '}
 
                   <span className="font-semibold text-slate-800">
-                    "{formData.subject}"
+                    &quot;{formData.subject}&quot;
                   </span>
 
                   . Our support representative will contact
@@ -828,12 +841,84 @@ export default function ContactForm() {
                   <textarea
                     id="message"
                     name="message"
-                    rows={4}
+                    rows={3}
                     value={formData.message}
                     onChange={handleChange}
                     placeholder="Tell us more about your inquiry or requirements..."
                     className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 focus:border-blue-600 focus:ring-4 focus:ring-blue-100 rounded-lg text-slate-900 text-sm focus:outline-none transition-all resize-none"
                   />
+
+                </div>
+
+                {/* Optional Company & Deal Info */}
+
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
+
+                  <div className="flex items-center justify-between">
+
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+
+                      🏢 Company & Deal Info
+
+                    </span>
+
+                    <span className="text-xs text-slate-400">
+
+                      (Optional HubSpot Association)
+
+                    </span>
+
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                    <input
+                      type="text"
+                      name="companyName"
+                      value={formData.companyName}
+                      onChange={handleChange}
+                      placeholder="Company Name (e.g. Acme Corp)"
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+
+                    <input
+                      type="text"
+                      name="companyDomain"
+                      value={formData.companyDomain}
+                      onChange={handleChange}
+                      placeholder="Company Domain (e.g. acme.com)"
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+                    <input
+                      type="text"
+                      name="dealName"
+                      value={formData.dealName}
+                      onChange={handleChange}
+                      placeholder="Deal Name (e.g. Acme Enterprise Deal)"
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    />
+
+                    <select
+                      name="dealStage"
+                      value={formData.dealStage}
+                      onChange={handleChange}
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200 cursor-pointer"
+                    >
+                      <option value="appointmentscheduled">Appointment Scheduled</option>
+                      <option value="qualifiedtobuy">Qualified to Buy</option>
+                      <option value="presentationscheduled">Presentation Scheduled</option>
+                      <option value="decisionmakerboughtin">Decision Maker Bought-In</option>
+                      <option value="contractsent">Contract Sent</option>
+                      <option value="closedwon">Closed Won</option>
+                      <option value="closedlost">Closed Lost</option>
+                    </select>
+
+                  </div>
 
                 </div>
 
@@ -909,6 +994,8 @@ export default function ContactForm() {
         </div>
 
       </div>
+
+    </div>
 
     </div>
   );
