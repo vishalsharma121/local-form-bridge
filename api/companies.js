@@ -7,7 +7,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        console.log('🐞 [API] /api/deals called');
+        console.log('🐞 [API] /api/companies called');
 
         const provided = req.headers['x-admin-key'];
         if (!provided || provided !== process.env.ADMIN_KEY) {
@@ -21,9 +21,8 @@ export default async function handler(req, res) {
             return res.status(500).json({ error: MISSING_TOKEN_ERROR });
         }
 
-        // Fetch deals from HubSpot CRM v3 API
         const response = await fetch(
-            'https://api.hubapi.com/crm/v3/objects/deals?limit=100&properties=dealname,pipeline,dealstage,amount,lead_source,createdate',
+            'https://api.hubapi.com/crm/v3/objects/companies?limit=100&properties=name,domain,lead_source,createdate',
             { headers: { Authorization: `Bearer ${token}` } }
         );
 
@@ -36,26 +35,24 @@ export default async function handler(req, res) {
         }
 
         if (!response.ok) {
-            console.error('❌ [API] HubSpot deals fetch error:', response.status, responseText);
+            console.error('❌ [API] HubSpot companies fetch error:', response.status, responseText);
             return res.status(response.status).json(data);
         }
 
         const sourcesMap = await getLeadSourcesMap();
 
-        const deals = (data.results || []).map((d) => ({
-            id: d.id,
-            dealname: d.properties.dealname || 'Unnamed Deal',
-            pipeline: d.properties.pipeline || 'default',
-            dealstage: d.properties.dealstage || 'appointmentscheduled',
-            amount: d.properties.amount || '0',
-            lead_source: d.properties.lead_source || sourcesMap[String(d.id)] || 'HubSpot / Unknown',
-            createdate: d.properties.createdate,
+        const companies = (data.results || []).map((c) => ({
+            id: c.id,
+            name: c.properties.name || c.properties.domain || 'Unnamed Company',
+            domain: c.properties.domain || '—',
+            lead_source: c.properties.lead_source || sourcesMap[String(c.id)] || 'HubSpot / Unknown',
+            createdate: c.properties.createdate,
         })).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
 
-        console.log(`✅ [API] Returning ${deals.length} deals`);
-        return res.status(200).json({ deals });
+        console.log(`✅ [API] Returning ${companies.length} companies`);
+        return res.status(200).json({ companies });
     } catch (err) {
         console.error('🔥 [API] Unexpected error:', err);
-        return res.status(500).json({ error: 'Failed to load deals.' });
+        return res.status(500).json({ error: 'Failed to load companies.' });
     }
 }

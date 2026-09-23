@@ -12,8 +12,15 @@ function vercelApiPlugin() {
       server.middlewares.use(async (req, res, next) => {
         if (!req.url.startsWith('/api/')) return next();
 
-        const routeName = req.url.split('?')[0].replace('/api/', '');
-        const modulePath = `/api/${routeName}.js`;
+        let routeName = req.url.split('?')[0].replace('/api/', '');
+        let modulePath = `/api/${routeName}.js`;
+
+        // Check for parameterized route /api/sync-errors/:id/retry
+        const syncErrorRetryMatch = req.url.match(/^\/api\/sync-errors\/([^/]+)\/retry/);
+        if (syncErrorRetryMatch) {
+          req.params = { id: syncErrorRetryMatch[1] };
+          modulePath = '/api/retry-sync-error.js';
+        }
 
         try {
           const mod = await server.ssrLoadModule(modulePath);
@@ -39,7 +46,7 @@ function vercelApiPlugin() {
 
             await handler(req, res);
           });
-        } catch (err) {
+        } catch {
           res.statusCode = 404;
           res.end(JSON.stringify({ error: `API route not found: ${modulePath}` }));
         }

@@ -1,16 +1,34 @@
-# React + Vite
+# Local Form Bridge
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A full-stack lead capture and CRM integration bridge connecting modern React web forms to **HubSpot CRM v3** with an audit log & retry engine powered by **Neon Postgres** and **Vercel Serverless Functions**.
 
-Currently, two official plugins are available:
+## Architecture & Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Lead Capture Form**: Upserts Contacts, Companies, and Deals with deduplication and association linking in HubSpot CRM.
+- **Admin Dashboard**: Overview stats, directory views (Contacts, Companies, Deals), Error Audit Log, Retry Queue, and Activity Stream.
+- **Neon Postgres Audit Trail**: Log persistence for sync errors (`sync_errors`) and real-time events (`sync_activity`).
+- **Live Health Monitoring**: Dynamic `GET /api/hubspot-health` endpoint checking HubSpot API connectivity with server-side caching.
 
-## React Compiler
+## Environment Variables
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Copy `.env.example` to `.env` and configure:
 
-## Expanding the ESLint configuration
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `HUBSPOT_PRIVATE_APP_TOKEN` | Private App Access Token from HubSpot developer portal | `pat-na2-xxxx-xxxx` |
+| `ADMIN_KEY` | Secret key for dashboard API authentication | `your_secret_admin_key` |
+| `DATABASE_URL` | Connection string for Neon Postgres DB | `postgresql://user:pass@ep-xxx.neon.tech/neondb?sslmode=require` |
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Local Development
+
+```bash
+npm install
+npm run dev
+```
+
+## Vercel Deployment
+
+Deploy directly via Vercel CLI or GitHub integration. All serverless endpoints inside `api/` are automatically routed.
+
+- Ensure `HUBSPOT_PRIVATE_APP_TOKEN`, `ADMIN_KEY`, and `DATABASE_URL` are configured in Vercel Project Settings → Environment Variables.
+- Parameterized retry route `/api/sync-errors/:id/retry` is mapped via `vercel.json` rewrites to `/api/retry-sync-error?id=:id`.

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Navbar from './Navbar';
+import Footer from './Footer';
 
 export default function ContactForm() {
   const [formData, setFormData] = useState({
@@ -18,6 +19,7 @@ export default function ContactForm() {
   const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [submissionResult, setSubmissionResult] = useState(null);
 
   // Debug state
   const [debugMode, setDebugMode] = useState(false);
@@ -220,7 +222,8 @@ export default function ContactForm() {
         );
 
         throw new Error(
-          'Server returned an invalid response.'
+          'Server returned an invalid response.',
+          { cause: jsonError }
         );
       }
 
@@ -262,6 +265,30 @@ export default function ContactForm() {
         );
       }
 
+      if (data.companyId) {
+        addDebugLog(
+          `🏢 HubSpot Company Created: "${data.companyName}" (ID: ${data.companyId})`
+        );
+      }
+
+      if (data.dealId) {
+        addDebugLog(
+          `💼 HubSpot Deal Created: "${data.dealName}" (Stage: ${data.dealStage}, ID: ${data.dealId})`
+        );
+      }
+
+      if (data.companyError) {
+        addDebugLog(
+          `⚠️ HubSpot Company Warning: ${data.companyError.message}`
+        );
+      }
+
+      if (data.dealError) {
+        addDebugLog(
+          `⚠️ HubSpot Deal Warning: ${data.dealError.message}`
+        );
+      }
+
       if (data.debug) {
         addDebugLog(
           '🔐 Backend debug information',
@@ -269,6 +296,7 @@ export default function ContactForm() {
         );
       }
 
+      setSubmissionResult(data);
       setIsSubmitted(true);
 
     } catch (err) {
@@ -356,122 +384,13 @@ export default function ContactForm() {
   // --------------------------------------------------
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col transition-colors">
+    <div className="min-h-screen bg-[#f4f6fa] text-slate-800 font-sans flex flex-col transition-colors">
       <Navbar />
 
       <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-12">
         <div className="w-full max-w-5xl">
 
-        {/* ================================
-            DEBUG PANEL
-        ================================= */}
 
-        <div className="mb-5 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-
-          {/* Debug Header */}
-          <div className="px-4 py-3 flex items-center justify-between">
-
-            <div>
-              <h3 className="text-sm font-semibold text-slate-700">
-                🐞 Developer Debug
-              </h3>
-
-              <p className="text-xs text-slate-400 mt-0.5">
-                Monitor form submission and API activity
-              </p>
-            </div>
-
-            <button
-              type="button"
-              onClick={toggleDebugMode}
-              className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${debugMode
-                ? 'bg-emerald-50 text-emerald-700 border-emerald-300'
-                : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'
-                }`}
-            >
-              🐞 Debug {debugMode ? 'ON' : 'OFF'}
-            </button>
-
-          </div>
-
-          {/* Debug Console */}
-          {debugMode && (
-            <div className="border-t border-slate-200">
-
-              <div className="bg-slate-950 text-white">
-
-                {/* Console Header */}
-                <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-
-                  <div>
-                    <h4 className="text-sm font-semibold">
-                      🖥 Debug Console
-                    </h4>
-
-                    <p className="text-xs text-slate-500 mt-0.5">
-                      Frontend API activity
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDebugLogs([]);
-                      console.clear();
-                    }}
-                    className="text-xs px-3 py-1.5 rounded-md bg-slate-800 hover:bg-slate-700 text-slate-300"
-                  >
-                    Clear
-                  </button>
-
-                </div>
-
-                {/* Console Logs */}
-                <div className="max-h-80 overflow-y-auto p-4 space-y-3 font-mono text-xs">
-
-                  {debugLogs.length === 0 ? (
-                    <div className="text-slate-500">
-                      No debug activity yet...
-                      <br />
-                      Submit the form to see what happens.
-                    </div>
-                  ) : (
-                    debugLogs.map((log, index) => (
-                      <div
-                        key={index}
-                        className="border-b border-slate-800 pb-3 last:border-0"
-                      >
-
-                        <div className="text-slate-500 mb-1">
-                          {log.time}
-                        </div>
-
-                        <div className="text-emerald-400">
-                          {log.message}
-                        </div>
-
-                        {log.data && (
-                          <pre className="mt-2 text-slate-300 whitespace-pre-wrap break-words">
-                            {JSON.stringify(
-                              log.data,
-                              null,
-                              2
-                            )}
-                          </pre>
-                        )}
-
-                      </div>
-                    ))
-                  )}
-
-                </div>
-
-              </div>
-
-            </div>
-          )}
-
-        </div>
 
         {/* ================================
             CONTACT FORM
@@ -481,107 +400,67 @@ export default function ContactForm() {
 
           {/* Left Information Panel */}
 
-          <div className="lg:col-span-5 bg-slate-900 text-white p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden">
+          <div className="lg:col-span-5 bg-gradient-to-br from-[#F7941D] via-[#EE3124] to-[#C41C10] text-white p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden">
 
-            <div className="absolute -right-16 -bottom-16 w-64 h-64 bg-blue-600/20 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="absolute -right-16 -bottom-16 w-64 h-64 bg-yellow-400/20 rounded-full blur-3xl pointer-events-none"></div>
 
-            <div className="absolute -left-16 -top-16 w-64 h-64 bg-indigo-600/20 rounded-full blur-3xl pointer-events-none"></div>
+            <div className="absolute -left-16 -top-16 w-64 h-64 bg-orange-300/20 rounded-full blur-3xl pointer-events-none"></div>
 
             <div className="relative z-10 space-y-6">
 
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-400/20 text-blue-400 text-xs font-semibold uppercase tracking-wider">
-                Contact Us
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/20 border border-white/30 text-white text-xs font-bold uppercase tracking-wider backdrop-blur-sm shadow-sm">
+                <span>11+ Years of Experience</span>
               </div>
 
-              <h2 className="text-3xl font-bold tracking-tight text-white leading-tight">
+              <h2 className="text-3xl font-extrabold tracking-tight text-white leading-tight">
                 Let&apos;s build something great together
               </h2>
 
-              <p className="text-slate-400 text-sm leading-relaxed">
-                Whether you have a question about features,
-                pricing, need a demo, or anything else, our
-                team is ready to answer all your questions.
+              <p className="text-white/90 text-sm leading-relaxed">
+                Whether you have a question about features, pricing, need a custom integration demo, or want to explore our digital transformation services, our team is ready to help.
               </p>
 
-              <div className="space-y-5 pt-4">
+              <div className="space-y-4 pt-2">
 
-                {/* Email */}
-
-                <div className="flex items-start gap-4">
-
-                  <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center text-blue-400 shrink-0">
-                    ✉
+                {/* India Office Card */}
+                <div className="p-3.5 rounded-xl bg-white/10 border border-white/20 space-y-1.5 backdrop-blur-sm">
+                  <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-yellow-300">
+                    <span>📍 INDIA OFFICE</span>
                   </div>
-
-                  <div>
-                    <h4 className="text-xs uppercase tracking-wider font-semibold text-slate-400">
-                      Email Us
-                    </h4>
-
-                    <p className="text-sm font-medium text-white mt-0.5">
-                      contact@company.com
-                    </p>
+                  <p className="text-xs text-white/90 leading-relaxed font-medium">
+                    D 235 A, Near Hindustan Times, Sector 74, Mohali, Punjab 160074
+                  </p>
+                  <div className="text-xs font-mono text-white flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 border-t border-white/10">
+                    <span>✉ info@starkedge.com</span>
+                    <span>☎ +91 9780970000</span>
                   </div>
-
                 </div>
 
-                {/* Phone */}
-
-                <div className="flex items-start gap-4">
-
-                  <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center text-blue-400 shrink-0">
-                    ☎
+                {/* USA Office Card */}
+                <div className="p-3.5 rounded-xl bg-white/10 border border-white/20 space-y-1.5 backdrop-blur-sm">
+                  <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-200">
+                    <span>📍 USA OFFICE</span>
                   </div>
-
-                  <div>
-                    <h4 className="text-xs uppercase tracking-wider font-semibold text-slate-400">
-                      Call Us
-                    </h4>
-
-                    <p className="text-sm font-medium text-white mt-0.5">
-                      +1 (800) 234-5678
-                    </p>
+                  <p className="text-xs text-white/90 leading-relaxed font-medium">
+                    350 Rhodes Island St, #240, Suite 233 San Francisco, CA 94103
+                  </p>
+                  <div className="text-xs font-mono text-white flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 border-t border-white/10">
+                    <span>✉ sales@starkedge.com</span>
+                    <span>☎ +1 (209) 379-0229</span>
                   </div>
-
-                </div>
-
-                {/* Address */}
-
-                <div className="flex items-start gap-4">
-
-                  <div className="w-10 h-10 rounded-lg bg-slate-800 border border-slate-700/80 flex items-center justify-center text-blue-400 shrink-0">
-                    📍
-                  </div>
-
-                  <div>
-                    <h4 className="text-xs uppercase tracking-wider font-semibold text-slate-400">
-                      Headquarters
-                    </h4>
-
-                    <p className="text-sm font-medium text-white mt-0.5">
-                      100 Tech Boulevard, Suite 400
-                      <br />
-                      San Francisco, CA 94107
-                    </p>
-                  </div>
-
                 </div>
 
               </div>
 
             </div>
 
-            <div className="relative z-10 pt-8 mt-8 border-t border-slate-800 text-xs text-slate-400 flex items-center gap-2">
-
-              <span className="text-emerald-400">
-                ✓
-              </span>
-
-              <span>
-                Your information is protected with
-                end-to-end privacy.
-              </span>
-
+            {/* Trust badge */}
+            <div className="relative z-10 pt-6 mt-8 border-t border-white/20 text-xs text-white/90 flex items-center justify-between">
+              <div className="flex items-center gap-2 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse"></span>
+                <span>HubSpot Official Partner Bridge</span>
+              </div>
+              <span className="font-bold bg-white/20 px-2 py-0.5 rounded text-[10px] text-white">Clutch ★ 4.9/5</span>
             </div>
 
           </div>
@@ -626,9 +505,30 @@ export default function ContactForm() {
 
                 </p>
 
+                {(submissionResult?.companyError || submissionResult?.dealError) && (
+                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-200/80 text-amber-900 text-xs text-left max-w-md mx-auto space-y-1.5 shadow-sm">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-800">
+                      <span>⚠️ HubSpot Sync Warning</span>
+                    </div>
+                    <p className="text-amber-700">
+                      Your contact was saved, but some CRM records could not be created due to permission limits:
+                    </p>
+                    {submissionResult.companyError && (
+                      <p className="font-mono text-[11px] text-amber-900 bg-amber-100/70 p-1.5 rounded">
+                        • Company: {submissionResult.companyError.message}
+                      </p>
+                    )}
+                    {submissionResult.dealError && (
+                      <p className="font-mono text-[11px] text-amber-900 bg-amber-100/70 p-1.5 rounded">
+                        • Deal: {submissionResult.dealError.message}
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 <button
                   onClick={handleReset}
-                  className="mt-6 px-6 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-all shadow-sm cursor-pointer"
+                  className="mt-6 px-6 py-2.5 rounded-lg bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white font-semibold text-sm transition-all shadow-md cursor-pointer"
                 >
                   Submit Another Request
                 </button>
@@ -672,7 +572,7 @@ export default function ContactForm() {
                       className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5"
                     >
                       Full Name{' '}
-                      <span className="text-blue-600">
+                      <span className="text-[#EE3124]">
                         *
                       </span>
                     </label>
@@ -686,7 +586,7 @@ export default function ContactForm() {
                       placeholder="John Doe"
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.name
                         ? 'border-red-500 focus:ring-red-200'
-                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        : 'border-slate-300 focus:border-[#EE3124] focus:ring-orange-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all`}
                     />
 
@@ -707,7 +607,7 @@ export default function ContactForm() {
                       className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5"
                     >
                       Email Address{' '}
-                      <span className="text-blue-600">
+                      <span className="text-[#EE3124]">
                         *
                       </span>
                     </label>
@@ -721,7 +621,7 @@ export default function ContactForm() {
                       placeholder="john@example.com"
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.email
                         ? 'border-red-500 focus:ring-red-200'
-                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        : 'border-slate-300 focus:border-[#EE3124] focus:ring-orange-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all`}
                     />
 
@@ -748,7 +648,7 @@ export default function ContactForm() {
                       className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5"
                     >
                       Contact Number{' '}
-                      <span className="text-blue-600">
+                      <span className="text-[#EE3124]">
                         *
                       </span>
                     </label>
@@ -762,7 +662,7 @@ export default function ContactForm() {
                       placeholder="+1 (555) 000-0000"
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.phone
                         ? 'border-red-500 focus:ring-red-200'
-                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        : 'border-slate-300 focus:border-[#EE3124] focus:ring-orange-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all`}
                     />
 
@@ -783,7 +683,7 @@ export default function ContactForm() {
                       className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5"
                     >
                       Subject{' '}
-                      <span className="text-blue-600">
+                      <span className="text-[#EE3124]">
                         *
                       </span>
                     </label>
@@ -795,7 +695,7 @@ export default function ContactForm() {
                       onChange={handleChange}
                       className={`w-full px-4 py-2.5 bg-slate-50 border ${errors.subject
                         ? 'border-red-500 focus:ring-red-200'
-                        : 'border-slate-300 focus:border-blue-600 focus:ring-blue-100'
+                        : 'border-slate-300 focus:border-[#EE3124] focus:ring-orange-100'
                         } rounded-lg text-slate-900 text-sm focus:outline-none focus:ring-4 transition-all cursor-pointer`}
                     >
                       {subjectOptions.map((opt) => (
@@ -845,7 +745,7 @@ export default function ContactForm() {
                     value={formData.message}
                     onChange={handleChange}
                     placeholder="Tell us more about your inquiry or requirements..."
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 focus:border-blue-600 focus:ring-4 focus:ring-blue-100 rounded-lg text-slate-900 text-sm focus:outline-none transition-all resize-none"
+                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 focus:border-[#EE3124] focus:ring-4 focus:ring-orange-100 rounded-lg text-slate-900 text-sm focus:outline-none transition-all resize-none"
                   />
 
                 </div>
@@ -878,7 +778,7 @@ export default function ContactForm() {
                       value={formData.companyName}
                       onChange={handleChange}
                       placeholder="Company Name (e.g. Acme Corp)"
-                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-200"
                     />
 
                     <input
@@ -887,7 +787,7 @@ export default function ContactForm() {
                       value={formData.companyDomain}
                       onChange={handleChange}
                       placeholder="Company Domain (e.g. acme.com)"
-                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-200"
                     />
 
                   </div>
@@ -900,14 +800,14 @@ export default function ContactForm() {
                       value={formData.dealName}
                       onChange={handleChange}
                       placeholder="Deal Name (e.g. Acme Enterprise Deal)"
-                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-200"
                     />
 
                     <select
                       name="dealStage"
                       value={formData.dealStage}
                       onChange={handleChange}
-                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-200 cursor-pointer"
+                      className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-200 cursor-pointer"
                     >
                       <option value="appointmentscheduled">Appointment Scheduled</option>
                       <option value="qualifiedtobuy">Qualified to Buy</option>
@@ -935,7 +835,7 @@ export default function ContactForm() {
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="w-full py-3 px-6 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-sm shadow-md shadow-blue-600/20 active:scale-[0.99] disabled:opacity-70 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full py-3.5 px-6 rounded-lg bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white font-bold text-sm shadow-lg shadow-orange-500/25 active:scale-[0.99] disabled:opacity-70 transition-all flex items-center justify-center gap-2 cursor-pointer border-0"
                 >
 
                   {isSubmitting ? (
@@ -997,6 +897,10 @@ export default function ContactForm() {
 
     </div>
 
+    {/* ================================
+        STARKEDGE BRAND FOOTER & OFFICE LOCATIONS
+    ================================= */}
+    <Footer />
     </div>
   );
 }

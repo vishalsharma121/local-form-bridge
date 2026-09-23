@@ -1,8 +1,12 @@
 {
-    "rewrites": [
-        {
-            "source": "/((?!api/|@vite|@react-refresh|.*\\.[a-zA-Z0-9]+$).*)",
-            "destination": "/index.html"
-        }
-    ]
+  "rewrites": [
+    {
+      "source": "/api/sync-errors/:id/retry",
+      "destination": "/api/retry-sync-error?id=:id"
+    },
+    {
+      "source": "/((?!api/|@vite|@react-refresh|.*\\.[a-zA-Z0-9]+$).*)",
+      "destination": "/index.html"
+    }
+  ]
 }

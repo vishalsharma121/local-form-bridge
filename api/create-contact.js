@@ -1,5 +1,10 @@
+import { logSyncError } from '../lib/errorLogger.js';
+import { logSyncActivity } from '../lib/activityLogger.js';
+import { getHubSpotToken, MISSING_TOKEN_ERROR } from '../lib/hubspot.js';
+import { getAppSetting } from '../lib/appSettings.js';
+import { recordLeadSource } from '../lib/leadSourceTracker.js';
+
 export default async function handler(req, res) {
-    // Only allow POST requests
     if (req.method !== 'POST') {
         return res.status(405).json({
             error: 'Method not allowed',
@@ -9,12 +14,23 @@ export default async function handler(req, res) {
     try {
         console.log('🐞 [API] /api/create-contact called');
 
-        const { name, email, phone, subject, message } = req.body || {};
+        const { 
+            name, 
+            email, 
+            phone, 
+            subject, 
+            message,
+            companyName,
+            companyDomain,
+            dealName,
+            pipeline,
+            dealStage,
+            dealAmount
+        } = req.body || {};
 
         // Validate required fields
         if (!name?.trim() || !email?.trim()) {
             console.log('❌ [API] Validation failed: name or email missing');
-
             return res.status(400).json({
                 error: 'Name and email are required.',
             });
@@ -22,121 +38,168 @@ export default async function handler(req, res) {
 
         const [firstname, ...rest] = name.trim().split(/\s+/);
         const lastname = rest.join(' ') || '-';
+        const cleanEmail = email.trim();
 
         // Get HubSpot token from environment variable
-        const token = process.env.HUBSPOT_PRIVATE_APP_TOKEN;
-
+        const token = getHubSpotToken();
         if (!token) {
-            console.error('❌ [API] HubSpot token is not configured');
-
+            console.error('❌ [API]', MISSING_TOKEN_ERROR);
+            await logSyncError({
+                type: 'contact',
+                operation: 'auth',
+                entityInfo: { email: cleanEmail, name },
+                statusCode: 500,
+                errorMessage: MISSING_TOKEN_ERROR,
+                details: null
+            });
             return res.status(500).json({
-                error: 'HubSpot token is not configured.',
+                error: MISSING_TOKEN_ERROR,
             });
         }
-
-        const properties = {
-            firstname,
-            lastname,
-            email: email.trim(),
-            phone: phone || '',
-            subject: subject || '',
-            message: message || '',
-        };
 
         const headers = {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
         };
 
-        console.log('🔍 [API] Checking whether contact already exists');
-        console.log('📧 [API] Email:', email.trim());
+        const properties = {
+            firstname,
+            lastname,
+            email: cleanEmail,
+            phone: phone || '',
+            subject: subject || '',
+            message: message || '',
+            lead_source: 'Website Form',
+        };
+
+        const safeFetch = async (url, opts) => {
+            let res = await fetch(url, opts);
+            if (!res.ok && res.status === 400) {
+                try {
+                    const cloned = res.clone();
+                    const errData = await cloned.json();
+                    if (errData.message?.includes('PROPERTY_DOESNT_EXIST') || errData.errors?.some(e => e.code === 'PROPERTY_DOESNT_EXIST')) {
+                        console.warn('⚠️ [HubSpot Safety Net] Property "lead_source" does not exist in HubSpot portal. Retrying request without lead_source property...');
+                        if (opts.body) {
+                            const parsed = JSON.parse(opts.body);
+                            if (parsed.properties && parsed.properties.lead_source) {
+                                delete parsed.properties.lead_source;
+                                opts.body = JSON.stringify(parsed);
+                                res = await fetch(url, opts);
+                            }
+                        }
+                    }
+                } catch {
+                    // Ignore parse errors
+                }
+            }
+            return res;
+        };
+
+        console.log('🔍 [API] Checking whether contact already exists:', cleanEmail);
 
         // Check whether contact already exists
         const lookup = await fetch(
-            `https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(
-                email.trim()
-            )}?idProperty=email`,
-            {
-                headers,
-            }
+            `https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(cleanEmail)}?idProperty=email`,
+            { headers }
         );
-
-        console.log('📡 [API] HubSpot lookup status:', lookup.status);
 
         let response;
         let action = '';
+        let data;
 
         // Existing contact
         if (lookup.status === 200) {
             action = 'update';
-
             const existing = await lookup.json();
+            console.log('🔄 [API] Existing contact found. ID:', existing.id);
 
-            console.log('🔄 [API] Existing contact found');
-            console.log('🆔 [API] Contact ID:', existing.id);
-
-            // Update existing contact
-            response = await fetch(
+            response = await safeFetch(
                 `https://api.hubapi.com/crm/v3/objects/contacts/${existing.id}`,
                 {
                     method: 'PATCH',
                     headers,
-                    body: JSON.stringify({
-                        properties,
-                    }),
+                    body: JSON.stringify({ properties }),
                 }
             );
-
-            console.log('📡 [API] HubSpot UPDATE status:', response.status);
+            data = await response.json();
         }
-
-        // Contact does not exist
+        // Contact does not exist at lookup time
         else if (lookup.status === 404) {
             action = 'create';
-
-            console.log('🆕 [API] Contact does not exist');
-            console.log('➕ [API] Creating new HubSpot contact');
-
-            // Create new contact
-            response = await fetch(
+            console.log('🆕 [API] Creating new HubSpot contact');
+            response = await safeFetch(
                 'https://api.hubapi.com/crm/v3/objects/contacts',
                 {
                     method: 'POST',
                     headers,
-                    body: JSON.stringify({
-                        properties,
-                    }),
+                    body: JSON.stringify({ properties }),
                 }
             );
+            data = await response.json();
 
-            console.log('📡 [API] HubSpot CREATE status:', response.status);
+            // Handle race condition: If POST fails due to concurrent creation (409 Conflict or 400 Existing Contact)
+            if (!response.ok && (response.status === 409 || response.status === 400)) {
+                console.warn('⚡ [API] Race condition detected during contact creation. Retrying lookup...');
+                
+                const retryLookup = await fetch(
+                    `https://api.hubapi.com/crm/v3/objects/contacts/${encodeURIComponent(cleanEmail)}?idProperty=email`,
+                    { headers }
+                );
+
+                if (retryLookup.status === 200) {
+                    const existingRetry = await retryLookup.json();
+                    action = 'update';
+                    console.log('🔄 [API] Race condition resolved. Updating contact ID:', existingRetry.id);
+
+                    response = await safeFetch(
+                        `https://api.hubapi.com/crm/v3/objects/contacts/${existingRetry.id}`,
+                        {
+                            method: 'PATCH',
+                            headers,
+                            body: JSON.stringify({ properties }),
+                        }
+                    );
+                    data = await response.json();
+                }
+            }
         }
-
-        // Unexpected lookup error
         else {
             const errorText = await lookup.text();
-
-            console.error(
-                '❌ [API] HubSpot lookup failed:',
-                lookup.status
-            );
-
+            console.error('❌ [API] HubSpot lookup failed:', lookup.status);
+            logSyncError({
+                type: 'contact',
+                operation: 'lookup',
+                entityInfo: { email: cleanEmail, name },
+                statusCode: lookup.status,
+                errorMessage: 'HubSpot contact lookup failed',
+                details: errorText
+            });
             return res.status(lookup.status).json({
                 error: 'HubSpot lookup failed',
                 details: errorText,
             });
         }
 
-        // Read HubSpot response
-        const data = await response.json();
-
-        // HubSpot returned an error
         if (!response.ok) {
-            console.error(
-                '❌ [API] HubSpot request failed:',
-                response.status
-            );
-
+            console.error('❌ [API] HubSpot contact request failed:', response.status);
+            logSyncError({
+                type: 'contact',
+                operation: action || 'create',
+                entityInfo: { email: cleanEmail, name },
+                statusCode: response.status,
+                errorMessage: data.message || 'Contact sync failed in HubSpot',
+                details: data
+            });
+            logSyncActivity({
+                status: 'failure',
+                type: 'contact',
+                operation: action || 'create',
+                entityInfo: { email: cleanEmail, name },
+                statusCode: response.status,
+                message: data.message || 'Contact sync failed in HubSpot',
+                details: data
+            });
             return res.status(response.status).json({
                 ...data,
                 action,
@@ -145,109 +208,441 @@ export default async function handler(req, res) {
 
         const contactId = data.id;
         console.log(`✅ [API] Contact ${action} successful. ID: ${contactId}`);
+        await recordLeadSource(contactId, 'contact', 'Website Form');
+        logSyncActivity({
+            status: 'success',
+            type: 'contact',
+            operation: action || 'create',
+            entityInfo: { email: cleanEmail, name, id: contactId },
+            statusCode: response.status,
+            message: `Contact ${action} successful (${cleanEmail})`,
+            details: data
+        });
 
-        // ------------------------------------------------
-        // OPTIONAL: CREATE COMPANY & ASSOCIATE
-        // ------------------------------------------------
+        // --------------------------------------------------
+        // FETCH APP SETTINGS FOR AUTO-CREATION PREFERENCE
+        // --------------------------------------------------
+        const autoCreateSetting = await getAppSetting('auto_create_company_deal', 'false');
+        const autoCreateEnabled = String(autoCreateSetting).toLowerCase() === 'true';
+
+        // --------------------------------------------------
+        // 1. CREATE / LINK COMPANY IN HUBSPOT (WITH DEDUPLICATION & ERROR TRACKING)
+        // --------------------------------------------------
         let companyId = null;
-        const { companyName, companyDomain, dealName, pipeline, dealStage, dealAmount } = req.body || {};
+        let companyError = null;
+        let finalCompanyName = companyName?.trim();
+        let finalCompanyDomain = companyDomain?.trim();
 
-        if (companyName?.trim() || companyDomain?.trim()) {
+        const hasExplicitCompanyInfo = Boolean(finalCompanyName || finalCompanyDomain);
+        const shouldProcessCompany = hasExplicitCompanyInfo || autoCreateEnabled;
+
+        if (shouldProcessCompany) {
+            // If company name not explicitly provided, extract from email domain if available
+            if (!finalCompanyName) {
+                const emailParts = cleanEmail.split('@');
+                if (emailParts.length === 2) {
+                    const domainPart = emailParts[1].toLowerCase();
+                    const ignoredDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'icloud.com'];
+                    if (!ignoredDomains.includes(domainPart)) {
+                        finalCompanyDomain = domainPart;
+                        const compBasename = domainPart.split('.')[0];
+                        finalCompanyName = compBasename.charAt(0).toUpperCase() + compBasename.slice(1);
+                    } else {
+                        finalCompanyName = `${firstname}'s Company`;
+                    }
+                } else {
+                    finalCompanyName = `${firstname}'s Company`;
+                }
+            }
+
             try {
-                console.log('🏢 [API] Creating Company in HubSpot');
-                const compRes = await fetch('https://api.hubapi.com/crm/v3/objects/companies', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        properties: {
-                            name: (companyName || companyDomain).trim(),
-                            domain: (companyDomain || '').trim(),
-                        },
-                    }),
-                });
+                // Helper function to search company in HubSpot
+                const findCompanyInHubSpot = async (filterProperty, filterValue) => {
+                    if (!filterValue) return null;
+                    const searchRes = await fetch('https://api.hubapi.com/crm/v3/objects/companies/search', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            filterGroups: [
+                                {
+                                    filters: [
+                                        {
+                                            propertyName: filterProperty,
+                                            operator: 'EQ',
+                                            value: filterValue,
+                                        },
+                                    ],
+                                },
+                            ],
+                        }),
+                    });
+                    if (searchRes.ok) {
+                        const searchData = await searchRes.json();
+                        if (searchData.results && searchData.results.length > 0) {
+                            return searchData.results[0].id;
+                        }
+                    }
+                    return null;
+                };
 
-                if (compRes.ok) {
-                    const compData = await compRes.json();
-                    companyId = compData.id;
-                    console.log(`✅ [API] Company created: ${companyId}`);
+                // First try finding by domain if domain is available
+                if (finalCompanyDomain) {
+                    companyId = await findCompanyInHubSpot('domain', finalCompanyDomain);
+                    if (companyId) {
+                        console.log(`🔄 [API] Existing company found by domain "${finalCompanyDomain}": ID ${companyId}`);
+                    }
+                }
 
-                    // Associate Contact -> Company
+                // If not found by domain, try finding by company name
+                if (!companyId && finalCompanyName) {
+                    companyId = await findCompanyInHubSpot('name', finalCompanyName);
+                    if (companyId) {
+                        console.log(`🔄 [API] Existing company found by name "${finalCompanyName}": ID ${companyId}`);
+                    }
+                }
+
+                // If still not found, create new Company in HubSpot
+                if (!companyId) {
+                    console.log(`🏢 [API] Creating new Company "${finalCompanyName}" in HubSpot`);
+                    const compRes = await safeFetch('https://api.hubapi.com/crm/v3/objects/companies', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            properties: {
+                                name: finalCompanyName,
+                                domain: finalCompanyDomain || '',
+                                lead_source: 'Website Form',
+                            },
+                        }),
+                    });
+
+                    if (compRes.ok) {
+                        const compData = await compRes.json();
+                        companyId = compData.id;
+                        console.log(`✅ [API] Company created: ID ${companyId}`);
+                        await recordLeadSource(companyId, 'company', 'Website Form');
+                        logSyncActivity({
+                            status: 'success',
+                            type: 'company',
+                            operation: 'create',
+                            entityInfo: { name: finalCompanyName, domain: finalCompanyDomain, id: companyId },
+                            statusCode: compRes.status,
+                            message: `Company created: ${finalCompanyName}`,
+                            details: compData
+                        });
+                    } else {
+                        const compErrData = await compRes.json();
+                        companyError = {
+                            status: compRes.status,
+                            message: compErrData.message || compErrData.error || 'Failed to create Company in HubSpot',
+                            category: compErrData.category || 'CRM_ERROR'
+                        };
+                        console.warn('⚠️ [API] Company creation failed:', companyError);
+                        logSyncError({
+                            type: 'company',
+                            operation: 'create',
+                            entityInfo: { name: finalCompanyName, domain: finalCompanyDomain, contactEmail: cleanEmail, contactId },
+                            statusCode: compRes.status,
+                            errorMessage: companyError.message,
+                            details: compErrData
+                        });
+                        logSyncActivity({
+                            status: 'failure',
+                            type: 'company',
+                            operation: 'create',
+                            entityInfo: { name: finalCompanyName, domain: finalCompanyDomain, contactEmail: cleanEmail, contactId },
+                            statusCode: compRes.status,
+                            message: companyError.message,
+                            details: compErrData
+                        });
+                    }
+                }
+
+                // Associate Contact -> Company if companyId exists
+                if (companyId) {
                     await fetch(
                         `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/companies/${companyId}/contact_to_company`,
                         { method: 'PUT', headers }
                     );
-                    console.log('🔗 [API] Associated Contact with Company');
+                    console.log(`🔗 [API] Associated Contact ${contactId} with Company ${companyId}`);
                 }
             } catch (compErr) {
-                console.warn('⚠️ [API] Company creation/association warning:', compErr.message);
+                companyError = { message: compErr.message || 'Company processing error' };
+                console.warn('⚠️ [API] Company lookup/creation error:', compErr.message);
+                logSyncError({
+                    type: 'company',
+                    operation: 'create',
+                    entityInfo: { name: finalCompanyName, domain: finalCompanyDomain, contactEmail: cleanEmail, contactId },
+                    statusCode: 500,
+                    errorMessage: compErr.message,
+                    details: null
+                });
+                logSyncActivity({
+                    status: 'failure',
+                    type: 'company',
+                    operation: 'create',
+                    entityInfo: { name: finalCompanyName, domain: finalCompanyDomain, contactEmail: cleanEmail, contactId },
+                    statusCode: 500,
+                    message: compErr.message || 'Company processing error',
+                    details: null
+                });
             }
+        } else {
+            console.log('ℹ️ [API] Skipping Company creation (fields blank & auto_create_company_deal is OFF)');
         }
 
-        // ------------------------------------------------
-        // OPTIONAL: CREATE DEAL & ASSOCIATE
-        // ------------------------------------------------
+        // --------------------------------------------------
+        // 2. CREATE / LINK / UPDATE DEAL IN HUBSPOT (WITH DEDUPLICATION & ERROR TRACKING)
+        // --------------------------------------------------
         let dealId = null;
-        const targetDealName = dealName?.trim() || (companyName?.trim() ? `${companyName.trim()} Deal` : null);
+        let dealError = null;
+        let finalDealName = dealName?.trim() || (subject ? `${name.trim()} - ${subject} Deal` : '');
+        let finalDealStage = 'appointmentscheduled';
 
-        if (targetDealName) {
+        const hasExplicitDealInfo = Boolean(dealName?.trim());
+        const shouldProcessDeal = hasExplicitDealInfo || autoCreateEnabled;
+
+        if (shouldProcessDeal) {
+            const VALID_DEAL_STAGES = [
+                'appointmentscheduled',
+                'qualifiedtobuy',
+                'presentationscheduled',
+                'decisionmakerboughtin',
+                'contractsent',
+                'closedwon',
+                'closedlost',
+            ];
+
+            const requestedStage = dealStage?.toString().toLowerCase().trim();
+            finalDealStage = VALID_DEAL_STAGES.includes(requestedStage)
+                ? requestedStage
+                : 'appointmentscheduled';
+
+            if (!finalDealName) {
+                finalDealName = `${name.trim()} - ${subject || 'New Lead'} Deal`;
+            }
+
+            const finalPipeline = (pipeline && typeof pipeline === 'string' && pipeline.trim())
+                ? pipeline.trim()
+                : 'default';
+
+            const parseNumericAmount = (val) => {
+                if (val === null || val === undefined) return '0';
+                const cleaned = String(val).replace(/[^0-9.]/g, '');
+                const num = parseFloat(cleaned);
+                return isNaN(num) || num < 0 ? '0' : String(num);
+            };
+
+            const finalAmount = parseNumericAmount(dealAmount);
+
             try {
-                console.log('💼 [API] Creating Deal in HubSpot');
-                const dealRes = await fetch('https://api.hubapi.com/crm/v3/objects/deals', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
+                // Check if contact has existing associated deals in HubSpot
+                const assocRes = await fetch(
+                    `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/deals`,
+                    { headers }
+                );
+
+                if (assocRes.ok) {
+                    const assocData = await assocRes.json();
+                    if (assocData.results && assocData.results.length > 0) {
+                        // Reuse existing deal ID
+                        dealId = assocData.results[0].id;
+                        console.log(`🔄 [API] Existing deal found for contact. Updating Deal ID: ${dealId}`);
+
+                        const updateProperties = {
+                            dealname: finalDealName,
+                            pipeline: finalPipeline,
+                            dealstage: finalDealStage,
+                            ...(dealAmount ? { amount: finalAmount } : {}),
+                        };
+
+                        const updateRes = await fetch(`https://api.hubapi.com/crm/v3/objects/deals/${dealId}`, {
+                            method: 'PATCH',
+                            headers,
+                            body: JSON.stringify({ properties: updateProperties }),
+                        });
+                        if (updateRes.ok) {
+                            console.log(`✅ [API] Deal updated successfully. ID: ${dealId}`);
+                        } else {
+                            const updateErrData = await updateRes.json();
+                            dealError = {
+                                status: updateRes.status,
+                                message: updateErrData.message || 'Failed to update existing deal',
+                            };
+                            console.warn('⚠️ [API] Deal update failed:', dealError);
+                            logSyncError({
+                                type: 'deal',
+                                operation: 'update',
+                                entityInfo: { dealName: finalDealName, contactEmail: cleanEmail, contactId, companyId, dealId },
+                                statusCode: updateRes.status,
+                                errorMessage: dealError.message,
+                                details: updateErrData
+                            });
+                            logSyncActivity({
+                                status: 'failure',
+                                type: 'deal',
+                                operation: 'update',
+                                entityInfo: { dealName: finalDealName, contactEmail: cleanEmail, contactId, companyId, dealId },
+                                statusCode: updateRes.status,
+                                message: dealError.message,
+                                details: updateErrData
+                            });
+                        }
+                    }
+                }
+
+                // If no existing deal associated with contact, create a new Deal
+                if (!dealId && !dealError) {
+                    console.log(`💼 [API] Creating new Deal "${finalDealName}" in Stage "${finalDealStage}"`);
+                    
+                    const dealBody = {
                         properties: {
-                            dealname: targetDealName,
-                            pipeline: pipeline || 'default',
-                            dealstage: dealstage || 'appointmentscheduled',
-                            amount: dealAmount ? String(dealAmount) : '0',
+                            dealname: finalDealName,
+                            pipeline: finalPipeline,
+                            dealstage: finalDealStage,
+                            amount: finalAmount,
+                            lead_source: 'Website Form',
                         },
-                    }),
-                });
+                        associations: [
+                            {
+                                to: { id: contactId },
+                                types: [
+                                    {
+                                        associationCategory: 'HUBSPOT_DEFINED',
+                                        associationTypeId: 3 // Deal to Contact
+                                    }
+                                ]
+                            },
+                            ...(companyId ? [{
+                                to: { id: companyId },
+                                types: [
+                                    {
+                                        associationCategory: 'HUBSPOT_DEFINED',
+                                        associationTypeId: 5 // Deal to Company
+                                    }
+                                ]
+                            }] : [])
+                        ]
+                    };
 
-                if (dealRes.ok) {
-                    const dealData = await dealRes.json();
-                    dealId = dealData.id;
-                    console.log(`✅ [API] Deal created: ${dealId}`);
+                    const dealRes = await safeFetch('https://api.hubapi.com/crm/v3/objects/deals', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify(dealBody),
+                    });
 
-                    // Associate Deal -> Contact
-                    await fetch(
-                        `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/contacts/${contactId}/deal_to_contact`,
-                        { method: 'PUT', headers }
-                    );
-                    console.log('🔗 [API] Associated Deal with Contact');
+                    if (dealRes.ok) {
+                        const dealData = await dealRes.json();
+                        dealId = dealData.id;
+                        console.log(`✅ [API] New deal created: ID ${dealId}`);
+                        await recordLeadSource(dealId, 'deal', 'Website Form');
+                        logSyncActivity({
+                            status: 'success',
+                            type: 'deal',
+                            operation: 'create',
+                            entityInfo: { dealName: finalDealName, amount: finalAmount, contactId, companyId, id: dealId },
+                            statusCode: dealRes.status,
+                            message: `Deal created: ${finalDealName} ($${finalAmount})`,
+                            details: dealData
+                        });
+                    } else {
+                        const dealErrData = await dealRes.json();
+                        dealError = {
+                            status: dealRes.status,
+                            message: dealErrData.message || dealErrData.error || 'Failed to create Deal in HubSpot',
+                            category: dealErrData.category || 'CRM_ERROR'
+                        };
+                        console.warn('⚠️ [API] Deal creation response not OK:', dealError);
+                        logSyncError({
+                            type: 'deal',
+                            operation: 'create',
+                            entityInfo: { dealName: finalDealName, contactEmail: cleanEmail, contactId, companyId },
+                            statusCode: dealRes.status,
+                            errorMessage: dealError.message,
+                            details: dealErrData
+                        });
+                        logSyncActivity({
+                            status: 'failure',
+                            type: 'deal',
+                            operation: 'create',
+                            entityInfo: { dealName: finalDealName, contactEmail: cleanEmail, contactId, companyId },
+                            statusCode: dealRes.status,
+                            message: dealError.message,
+                            details: dealErrData
+                        });
+                    }
+                }
 
-                    // Associate Deal -> Company (if company exists)
-                    if (companyId) {
+                // Fallback direct association PUT requests to ensure linkages
+                if (dealId) {
+                    try {
                         await fetch(
-                            `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies/${companyId}/deal_to_company`,
+                            `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/contacts/${contactId}/deal_to_contact`,
                             { method: 'PUT', headers }
                         );
-                        console.log('🔗 [API] Associated Deal with Company');
+                        if (companyId) {
+                            await fetch(
+                                `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies/${companyId}/deal_to_company`,
+                                { method: 'PUT', headers }
+                            );
+                        }
+                    } catch {
+                        // Ignored if association already exists
                     }
                 }
             } catch (dealErr) {
-                console.warn('⚠️ [API] Deal creation/association warning:', dealErr.message);
+                dealError = { message: dealErr.message || 'Deal processing error' };
+                console.warn('⚠️ [API] Deal lookup/creation error:', dealErr.message);
+                logSyncError({
+                    type: 'deal',
+                    operation: 'create',
+                    entityInfo: { dealName: finalDealName, contactEmail: cleanEmail, contactId, companyId },
+                    statusCode: 500,
+                    errorMessage: dealErr.message,
+                    details: null
+                });
+                logSyncActivity({
+                    status: 'failure',
+                    type: 'deal',
+                    operation: 'create',
+                    entityInfo: { dealName: finalDealName, contactEmail: cleanEmail, contactId, companyId },
+                    statusCode: 500,
+                    message: dealErr.message || 'Deal processing error',
+                    details: null
+                });
             }
+        } else {
+            console.log('ℹ️ [API] Skipping Deal creation (dealName blank & auto_create_company_deal is OFF)');
         }
 
         // Check whether frontend requested debug information
-        const debugMode =
-            req.headers['x-debug-mode'] === 'true';
+        const debugMode = req.headers['x-debug-mode'] === 'true';
 
-        // Successful response
+        // Successful response payload (including warning flags if any sub-object creation failed)
         return res.status(200).json({
             ...data,
-
-            // Tell frontend whether CREATE or UPDATE happened
             action,
-
-            // Extra information only when debug mode is enabled
+            companyId,
+            companyName: finalCompanyName,
+            companyDomain: finalCompanyDomain,
+            companyError: companyError || null,
+            dealId,
+            dealName: finalDealName,
+            dealStage: finalDealStage,
+            dealError: dealError || null,
             ...(debugMode && {
                 debug: {
                     endpoint: '/api/create-contact',
                     hubspot: 'connected',
                     action,
+                    contactId,
+                    companyId,
+                    companyError,
+                    companyName: finalCompanyName,
+                    dealId,
+                    dealError,
+                    dealName: finalDealName,
+                    dealStage: finalDealStage,
                     lookupStatus: lookup.status,
                     responseStatus: response.status,
                 },
@@ -255,10 +650,17 @@ export default async function handler(req, res) {
         });
 
     } catch (err) {
-        console.error('🔥 [API] Unexpected error:', err);
-
+        console.error('🔥 [API] Unexpected error in create-contact:', err);
+        logSyncError({
+            type: 'contact',
+            operation: 'create',
+            entityInfo: { email: req.body?.email || 'unknown', name: req.body?.name || 'unknown' },
+            statusCode: 500,
+            errorMessage: err.message || 'Unexpected server error during contact sync',
+            details: null
+        });
         return res.status(500).json({
-            error: 'Failed to create or update contact.',
+            error: 'Failed to create or update contact/company/deal.',
         });
     }
 }
