@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import ContactForm from './components/ContactForm';
 import AdminPage from './pages/AdminPage';
 
@@ -9,6 +10,7 @@ export default function App() {
         <Route path="/" element={<ContactForm />} />
         <Route path="/admin" element={<AdminPage />} />
       </Routes>
+      <SpeedInsights />
     </BrowserRouter>
   );
 }
