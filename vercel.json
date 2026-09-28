@@ -1,8 +1,28 @@
 {
   "rewrites": [
     {
+      "source": "/api/create-contact",
+      "destination": "/api/contacts"
+    },
+    {
+      "source": "/api/create-company",
+      "destination": "/api/companies"
+    },
+    {
+      "source": "/api/create-deal",
+      "destination": "/api/deals"
+    },
+    {
       "source": "/api/sync-errors/:id/retry",
-      "destination": "/api/retry-sync-error?id=:id"
+      "destination": "/api/sync-errors?id=:id"
+    },
+    {
+      "source": "/api/retry-sync-error",
+      "destination": "/api/sync-errors"
+    },
+    {
+      "source": "/api/error-logs",
+      "destination": "/api/sync-errors"
     },
     {
       "source": "/((?!api/|@vite|@react-refresh|.*\\.[a-zA-Z0-9]+$).*)",
