@@ -59,7 +59,7 @@ export default function Header({
   const formattedCountdown = String(countdown).padStart(2, '0');
 
   return (
-    <header className="sticky top-0 lg:top-5 z-30 bg-white/95 backdrop-blur-md transition-all py-3.5 px-4 sm:px-6 lg:mt-5 lg:mr-5 lg:ml-0 lg:rounded-3xl border-b lg:border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)]">
+    <header className="sticky top-0 lg:top-5 z-20 bg-white/95 backdrop-blur-md transition-all py-3.5 px-4 sm:px-6 lg:mt-5 lg:mr-5 lg:ml-0 lg:rounded-3xl border-b lg:border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)]">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
 
         {/* Left: Title & Breadcrumbs */}
