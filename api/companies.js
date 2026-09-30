@@ -243,5 +243,221 @@ export default async function handler(req, res) {
         }
     }
 
+    if (req.method === 'PUT') {
+        try {
+            console.log('🐞 [API] /api/companies (PUT) called');
+
+            const provided = req.headers['x-admin-key'];
+            if (!provided || provided !== process.env.ADMIN_KEY) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            const { id, name, domain } = req.body || {};
+            const companyId = id || req.query?.id;
+
+            if (!companyId) {
+                return res.status(400).json({ error: 'Company ID is required for updating.' });
+            }
+
+            const token = getHubSpotToken();
+            if (!token) {
+                return res.status(500).json({ error: MISSING_TOKEN_ERROR });
+            }
+
+            const properties = {};
+            if (name !== undefined) properties.name = name.trim();
+            if (domain !== undefined) properties.domain = domain.trim();
+
+            let oldRecord = {};
+            try {
+                const getOldRes = await fetch(
+                    `https://api.hubapi.com/crm/v3/objects/companies/${companyId}?properties=name,domain`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (getOldRes.ok) {
+                    const getOldData = await getOldRes.json();
+                    oldRecord = getOldData.properties || {};
+                }
+            } catch (fetchErr) {
+                console.warn('⚠️ [API] Could not fetch old company record:', fetchErr.message);
+            }
+
+            const diffParts = [];
+            const changes = {};
+
+            const oldName = oldRecord.name || '';
+            const newName = name !== undefined ? name.trim() : oldName;
+            if (newName && newName !== oldName) {
+                changes.name = { old: oldName || '—', new: newName };
+                diffParts.push(`Name ("${oldName || '—'}" → "${newName}")`);
+            }
+
+            const oldDomain = oldRecord.domain || '';
+            const newDomain = domain !== undefined ? domain.trim() : oldDomain;
+            if (newDomain !== oldDomain) {
+                changes.domain = { old: oldDomain || '—', new: newDomain || '—' };
+                diffParts.push(`Domain ("${oldDomain || '—'}" → "${newDomain || '—'}")`);
+            }
+
+            const diffSummary = diffParts.length > 0
+                ? `Company updated: ${diffParts.join(', ')}`
+                : `Company updated (ID: ${companyId}): No fields changed`;
+
+            const safeHubSpotPatch = async (url, token, initialProperties) => {
+                let propertiesToUpdate = { ...initialProperties };
+                
+                for (let attempt = 0; attempt < 5; attempt++) {
+                    let res = await fetch(url, {
+                        method: 'PATCH',
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ properties: propertiesToUpdate }),
+                    });
+
+                    if (res.ok) return res;
+
+                    if (res.status === 400) {
+                        try {
+                            const cloned = res.clone();
+                            const errData = await cloned.json();
+                            const errStr = JSON.stringify(errData);
+                            
+                            let missingProperties = [];
+
+                            if (errData.errors && Array.isArray(errData.errors)) {
+                                errData.errors.forEach(e => {
+                                    if (e.code === 'PROPERTY_DOESNT_EXIST' && e.name) {
+                                        missingProperties.push(e.name);
+                                    }
+                                });
+                            }
+
+                            const propMatches = errStr.match(/Property \\?"?([a-zA-Z0-9_]+)\\?"? does not exist/gi) || [];
+                            propMatches.forEach(m => {
+                                const clean = m.replace(/Property \\?"?/i, '').replace(/\\?"? does not exist/i, '').trim();
+                                if (clean) missingProperties.push(clean);
+                            });
+
+                            const nameMatches = errStr.match(/"name"\s*:\s*\\?"([a-zA-Z0-9_]+)\\?"/gi) || [];
+                            nameMatches.forEach(m => {
+                                const clean = m.replace(/"name"\s*:\s*\\?"/i, '').replace(/\\?"$/, '').trim();
+                                if (clean) missingProperties.push(clean);
+                            });
+
+                            if (missingProperties.length > 0) {
+                                let removedAny = false;
+                                missingProperties.forEach(prop => {
+                                    if (propertiesToUpdate[prop] !== undefined) {
+                                        console.warn(`⚠️ [HubSpot Safety Net] Property "${prop}" does not exist in HubSpot portal. Stripping property and retrying...`);
+                                        delete propertiesToUpdate[prop];
+                                        removedAny = true;
+                                    }
+                                });
+                                if (removedAny) continue;
+                            }
+                            return res;
+                        } catch {
+                            return res;
+                        }
+                    }
+                    return res;
+                }
+            };
+
+            const response = await safeHubSpotPatch(
+                `https://api.hubapi.com/crm/v3/objects/companies/${companyId}`,
+                token,
+                properties
+            );
+
+            const data = await response.json();
+            if (!response.ok) {
+                logSyncError({
+                    type: 'company',
+                    operation: 'update',
+                    entityInfo: { companyId, name: newName || oldName, domain: newDomain || oldDomain, changes },
+                    statusCode: response.status,
+                    errorMessage: data.message || 'Failed to update company in HubSpot',
+                    details: data
+                });
+                return res.status(response.status).json(data);
+            }
+
+            logSyncActivity({
+                status: 'success',
+                type: 'company',
+                operation: 'update',
+                entityInfo: { companyId, name: newName || oldName, domain: newDomain || oldDomain, changes },
+                statusCode: response.status,
+                message: diffSummary,
+                details: { companyId, changes, data }
+            });
+
+            return res.status(200).json({ success: true, company: data, changes });
+        } catch (err) {
+            console.error('🔥 [API] Edit company error:', err);
+            return res.status(500).json({ error: err.message || 'Failed to update company.' });
+        }
+    }
+
+    if (req.method === 'DELETE') {
+        try {
+            console.log('🐞 [API] /api/companies (DELETE) called');
+
+            const provided = req.headers['x-admin-key'];
+            if (!provided || provided !== process.env.ADMIN_KEY) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            const companyId = req.query?.id || req.body?.id;
+            if (!companyId) {
+                return res.status(400).json({ error: 'Company ID is required for deletion.' });
+            }
+
+            const token = getHubSpotToken();
+            if (!token) {
+                return res.status(500).json({ error: MISSING_TOKEN_ERROR });
+            }
+
+            const response = await fetch(`https://api.hubapi.com/crm/v3/objects/companies/${companyId}`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok && response.status !== 204) {
+                const data = await response.json().catch(() => ({}));
+                logSyncError({
+                    type: 'company',
+                    operation: 'delete',
+                    entityInfo: { companyId },
+                    statusCode: response.status,
+                    errorMessage: data.message || 'Failed to delete company in HubSpot',
+                    details: data
+                });
+                return res.status(response.status).json(data);
+            }
+
+            logSyncActivity({
+                status: 'success',
+                type: 'company',
+                operation: 'delete',
+                entityInfo: { companyId },
+                statusCode: 204,
+                message: `Company deleted from HubSpot (ID: ${companyId})`,
+                details: null
+            });
+
+            return res.status(200).json({ success: true, message: 'Company deleted successfully.' });
+        } catch (err) {
+            console.error('🔥 [API] Delete company error:', err);
+            return res.status(500).json({ error: err.message || 'Failed to delete company.' });
+        }
+    }
+
     return res.status(405).json({ error: 'Method not allowed' });
 }
+

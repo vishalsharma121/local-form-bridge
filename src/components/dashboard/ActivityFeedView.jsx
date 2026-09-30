@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Activity, 
   Search, 
@@ -16,8 +17,25 @@ import {
   ChevronRight,
   PlusCircle,
   RotateCw,
-  Bot
+  Bot,
+  ArrowRight,
+  Edit3
 } from 'lucide-react';
+
+function parseMessageDiffs(message) {
+  if (!message) return [];
+  const regex = /([A-Za-z0-9\s_]+)\s*\("([^"]*)"\s*→\s*"([^"]*)"\)/g;
+  const matches = [];
+  let match;
+  while ((match = regex.exec(message)) !== null) {
+    matches.push({
+      field: match[1].trim(),
+      oldVal: match[2],
+      newVal: match[3]
+    });
+  }
+  return matches;
+}
 
 export default function ActivityFeedView({
   activities = [],
@@ -107,10 +125,37 @@ export default function ActivityFeedView({
   const getOperationBadge = (operation) => {
     const op = (operation || '').toLowerCase().trim();
 
+    if (op.includes('delete')) {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-rose-50 text-rose-700 border border-rose-200 inline-flex items-center gap-1.5 uppercase tracking-wider shadow-2xs">
+          <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+          <span>Delete</span>
+        </span>
+      );
+    }
+
+    if (op.includes('update')) {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center gap-1.5 uppercase tracking-wider shadow-2xs">
+          <Edit3 className="w-3.5 h-3.5 text-amber-600" />
+          <span>Update</span>
+        </span>
+      );
+    }
+
+    if (op.includes('create')) {
+      return (
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-sky-50 text-sky-700 border border-sky-200 inline-flex items-center gap-1.5 uppercase tracking-wider shadow-2xs">
+          <PlusCircle className="w-3.5 h-3.5 text-sky-500" />
+          <span>Create</span>
+        </span>
+      );
+    }
+
     if (op.includes('auto-retry')) {
       return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200 inline-flex items-center gap-1.5 uppercase tracking-wider">
-          <Bot className="w-3.5 h-3.5 text-indigo-500" />
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200 inline-flex items-center gap-1.5 uppercase tracking-wider shadow-2xs">
+          <Bot className="w-3.5 h-3.5 text-purple-500" />
           <span>Auto-Retry</span>
         </span>
       );
@@ -118,24 +163,24 @@ export default function ActivityFeedView({
 
     if (op.includes('retry')) {
       return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-amber-50 text-amber-700 border border-amber-200 inline-flex items-center gap-1.5 uppercase tracking-wider">
-          <RotateCw className="w-3.5 h-3.5 text-amber-500" />
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-violet-50 text-violet-700 border border-violet-200 inline-flex items-center gap-1.5 uppercase tracking-wider shadow-2xs">
+          <RotateCw className="w-3.5 h-3.5 text-violet-500" />
           <span>Retry</span>
         </span>
       );
     }
 
-    if (op.includes('create')) {
+    if (op.includes('lookup')) {
       return (
-        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-cyan-50 text-cyan-700 border border-cyan-200 inline-flex items-center gap-1.5 uppercase tracking-wider">
-          <PlusCircle className="w-3.5 h-3.5 text-cyan-500" />
-          <span>Create</span>
+        <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200 inline-flex items-center gap-1.5 uppercase tracking-wider shadow-2xs">
+          <Search className="w-3.5 h-3.5 text-blue-500" />
+          <span>Lookup</span>
         </span>
       );
     }
 
     return (
-      <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 inline-flex items-center gap-1.5 uppercase tracking-wider">
+      <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-slate-100 text-slate-700 border border-slate-200 inline-flex items-center gap-1.5 uppercase tracking-wider shadow-2xs">
         <Activity className="w-3.5 h-3.5 text-slate-400" />
         <span>{operation || 'System'}</span>
       </span>
@@ -380,8 +425,8 @@ export default function ActivityFeedView({
       </div>
 
       {/* JSON Inspector Modal */}
-      {selectedActivity && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 bg-slate-950/40 backdrop-blur-sm animate-fade-in overflow-y-auto">
+      {selectedActivity && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/40 backdrop-blur-sm animate-fade-in overflow-y-auto">
           <div className="bg-white rounded-3xl max-w-xl w-full p-6 border border-slate-200 shadow-2xl space-y-5 my-auto max-h-[85vh] overflow-y-auto animate-modal-pop">
             <div className="flex items-center justify-between pb-4 border-b border-slate-100">
               <div className="flex items-center gap-2.5">
@@ -432,6 +477,84 @@ export default function ActivityFeedView({
                 </p>
               </div>
 
+              {/* Old vs New Diff Card */}
+              {(() => {
+                const diffs = parseMessageDiffs(selectedActivity.message);
+                if (diffs.length === 0) return null;
+                return (
+                  <div className="space-y-2 p-3.5 bg-orange-50/60 border border-orange-200/80 rounded-2xl">
+                    <span className="text-xs font-extrabold text-[#EE3124] uppercase tracking-wider flex items-center gap-1.5">
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>Field Changes Comparison (Old vs New)</span>
+                    </span>
+                    <div className="space-y-2">
+                      {diffs.map((d, i) => (
+                        <div key={i} className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 p-2.5 bg-white rounded-xl border border-orange-100 shadow-2xs text-xs font-semibold">
+                          <span className="font-extrabold text-slate-800 uppercase tracking-wider text-[10px] sm:text-xs">
+                            {d.field}
+                          </span>
+                          <div className="flex items-center gap-2 flex-wrap text-xs">
+                            <span className="px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 font-mono line-through decoration-rose-400">
+                              {d.oldVal || '—'}
+                            </span>
+                            <span className="text-slate-400 font-bold">→</span>
+                            <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono font-bold">
+                              {d.newVal}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Retry Resolution Details Card */}
+              {(() => {
+                const matchPrior = selectedActivity.message?.match(/\[Prior Issue:\s*"([^"]+)"\]/i);
+                const priorIssue = selectedActivity.entityInfo?.originalError || selectedActivity.details?.originalError || (matchPrior ? matchPrior[1] : null);
+                const isRetryOp = selectedActivity.operation === 'retry' || selectedActivity.operation === 'auto-retry' || Boolean(priorIssue);
+
+                if (!isRetryOp) return null;
+
+                return (
+                  <div className="space-y-3 p-4 bg-indigo-50/70 border border-indigo-200/80 rounded-2xl">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold text-indigo-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <RotateCw className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Retry Resolution & Issue Summary</span>
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-200 uppercase">
+                        Resolved
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 text-xs">
+                      <div className="p-3 bg-white rounded-xl border border-rose-200 shadow-2xs space-y-1">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-600 flex items-center gap-1">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-500" />
+                          Original Issue / Failed Error
+                        </span>
+                        <p className="font-semibold text-rose-900 font-mono text-[11px] leading-relaxed">
+                          {priorIssue || 'Sync operation previously failed in HubSpot API'}
+                        </p>
+                      </div>
+
+                      <div className="p-3 bg-white rounded-xl border border-emerald-200 shadow-2xs space-y-1">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                          Resolution Outcome
+                        </span>
+                        <p className="font-bold text-emerald-900 leading-relaxed">
+                          Successfully re-synced {selectedActivity.type || 'record'} to HubSpot CRM
+                          {selectedActivity.entityInfo?.syncedRecordId ? ` (HubSpot ID: ${selectedActivity.entityInfo.syncedRecordId})` : ''}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {selectedActivity.entityInfo && (
                 <div>
                   <span className="text-xs font-bold text-slate-700 block mb-1">Entity Payload</span>
@@ -460,7 +583,8 @@ export default function ActivityFeedView({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

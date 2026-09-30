@@ -50,14 +50,26 @@ export default async function handler(req, res) {
                     });
                 }
 
+                const originalErr = logEntry.errorMessage || logEntry.error_message || 'Sync error';
+                const createdId = retryResult.resultData?.id || retryResult.resultData?.contactId || retryResult.resultData?.companyId || retryResult.resultData?.dealId || '';
+                const idMsg = createdId ? ` (ID: ${createdId})` : '';
+
                 await logSyncActivity({
                     status: 'success',
                     type,
                     operation: 'retry',
-                    entityInfo,
+                    entityInfo: {
+                        ...(entityInfo || {}),
+                        originalError: originalErr,
+                        syncedRecordId: createdId || null,
+                        resolution: `Manual retry re-synced ${type} successfully to HubSpot`
+                    },
                     statusCode: 200,
-                    message: `Retry succeeded: Resolved ${type} sync error`,
-                    details: retryResult.resultData
+                    message: `Manual retry resolved ${type} error${idMsg} [Prior Issue: "${originalErr}"]`,
+                    details: {
+                        originalError: originalErr,
+                        resultData: retryResult.resultData
+                    }
                 });
 
                 return res.status(200).json({

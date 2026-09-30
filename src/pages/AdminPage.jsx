@@ -31,6 +31,7 @@ export default function AdminPage() {
   const [contacts, setContacts] = useState([]);
   const [companies, setCompanies] = useState([]);
   const [deals, setDeals] = useState([]);
+  const [pipelines, setPipelines] = useState([]);
   const [errorLogs, setErrorLogs] = useState([]);
   const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -84,7 +85,7 @@ export default function AdminPage() {
   }, [activities, dateRange, customStart, customEnd]);
 
   const unresolvedErrorLogsCount = useMemo(() => {
-    return (errorLogs || []).filter(log => !log.resolved).length;
+    return (errorLogs || []).filter(log => !log.resolved && log.status !== 'resolved').length;
   }, [errorLogs]);
 
   // Dashboard layout state
@@ -145,6 +146,7 @@ export default function AdminPage() {
       if (res.ok) {
         const data = await res.json();
         setDeals(data.deals || []);
+        if (data.pipelines) setPipelines(data.pipelines);
         return data;
       }
     } catch (err) {
@@ -537,6 +539,8 @@ export default function AdminPage() {
               onExportCSV={handleExportCSV}
               selectedContact={selectedContact}
               setSelectedContact={setSelectedContact}
+              onRefreshContacts={() => loadContacts(key, false)}
+              adminKey={key}
             />
           )}
 
@@ -546,12 +550,14 @@ export default function AdminPage() {
               loading={loading}
               error={error}
               onRefreshCompanies={() => loadCompanies(key, false)}
+              adminKey={key}
             />
           )}
 
           {activeTab === 'deals' && (
             <DealsView
               deals={filteredDeals}
+              pipelines={pipelines}
               loading={loading}
               error={error}
               contacts={filteredContacts}

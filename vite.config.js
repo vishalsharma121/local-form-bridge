@@ -12,7 +12,10 @@ function vercelApiPlugin() {
       server.middlewares.use(async (req, res, next) => {
         if (!req.url.startsWith('/api/')) return next();
 
-        let routeName = req.url.split('?')[0].replace('/api/', '');
+        const urlObj = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+        req.query = Object.fromEntries(urlObj.searchParams.entries());
+
+        let routeName = urlObj.pathname.replace('/api/', '');
         let modulePath = `/api/${routeName}.js`;
 
         // Check for parameterized route /api/sync-errors/:id/retry

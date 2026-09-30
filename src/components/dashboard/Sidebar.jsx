@@ -1,14 +1,14 @@
-import { 
-  LayoutDashboard, 
-  Users, 
+import {
+  LayoutDashboard,
+  Users,
   Building2,
-  Briefcase, 
+  Briefcase,
   ShieldAlert,
   Activity,
   RotateCw,
-  FileCode2, 
-  Settings, 
-  LogOut, 
+  FileCode2,
+  Settings,
+  LogOut,
   ExternalLink,
   Sparkles,
   X
@@ -56,7 +56,7 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
       label: 'Sync Error History',
       icon: ShieldAlert,
       badge: initialLoading ? '...' : (errorLogsCount !== undefined ? errorLogsCount : null),
-      badgeColor: errorLogsCount > 0 ? 'bg-rose-500/10 text-rose-600 border-rose-200' : 'bg-slate-100 text-slate-500 border-slate-200',
+      badgeColor: errorLogsCount > 0 ? 'bg-rose-500/10 text-rose-600 border-rose-200 font-extrabold' : 'bg-emerald-50 text-emerald-600 border-emerald-200 font-bold',
       description: 'Audit Sync Failures'
     },
     {
@@ -96,7 +96,7 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
     <>
       {/* Mobile Backdrop */}
       {isMobileOpen && (
-        <div 
+        <div
           onClick={() => setIsMobileOpen(false)}
           className="fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm lg:hidden transition-opacity"
         />
@@ -104,9 +104,8 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
 
       {/* Floating Figma-Style White Sidebar Card Container */}
       <aside
-        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white text-slate-700 flex flex-col justify-between transition-transform duration-300 ease-in-out lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:translate-x-0 lg:my-5 lg:ml-5 lg:rounded-3xl lg:shadow-[0_4px_24px_rgba(0,0,0,0.03)] lg:border lg:border-slate-200/80 overflow-hidden shrink-0 ${
-          isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
-        }`}
+        className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white text-slate-700 flex flex-col justify-between transition-transform duration-300 ease-in-out lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:translate-x-0 lg:my-5 lg:ml-5 lg:rounded-3xl lg:shadow-[0_4px_24px_rgba(0,0,0,0.03)] lg:border lg:border-slate-200/80 overflow-hidden shrink-0 ${isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
+          }`}
       >
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Brand Header */}
@@ -157,11 +156,10 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
                       setActiveTab(item.id);
                       setIsMobileOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl font-medium text-xs sm:text-sm transition-all text-left outline-none focus:outline-none focus:ring-0 focus-visible:outline-none ${
-                      isActive
-                        ? 'bg-gradient-to-r from-orange-50 to-red-50 text-[#EE3124] font-bold shadow-2xs border border-orange-200/70'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50/80'
-                    }`}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl font-medium text-xs sm:text-sm transition-all text-left outline-none focus:outline-none focus:ring-0 focus-visible:outline-none ${isActive
+                      ? 'bg-gradient-to-r from-orange-50 to-red-50 text-[#EE3124] font-bold shadow-2xs border-orange-200/70'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50/80'
+                      }`}
                   >
                     <div className="flex items-center gap-3">
                       <Icon className={`w-4 h-4 ${isActive ? 'text-[#EE3124]' : 'text-slate-400'}`} />
@@ -175,12 +173,11 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
 
                     {item.badge !== null && (
                       <span
-                        className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border ${
-                          item.badgeColor ||
+                        className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border ${item.badgeColor ||
                           (isActive
                             ? 'bg-[#EE3124]/10 text-[#EE3124] border-[#EE3124]/30'
                             : 'bg-slate-100 text-slate-500 border-slate-200/80')
-                        }`}
+                          }`}
                       >
                         {item.badge}
                       </span>
@@ -207,11 +204,10 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
                       setActiveTab(item.id);
                       setIsMobileOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl font-medium text-xs transition-all text-left outline-none focus:outline-none focus:ring-0 focus-visible:outline-none ${
-                      isActive
-                        ? 'bg-gradient-to-r from-orange-50 to-red-50 text-[#EE3124] font-bold shadow-2xs border border-orange-200/70'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50/80'
-                    }`}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl font-medium text-xs transition-all text-left outline-none focus:outline-none focus:ring-0 focus-visible:outline-none ${isActive
+                      ? 'bg-gradient-to-r from-orange-50 to-red-50 text-[#EE3124] font-bold shadow-2xs border-orange-200/70'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50/80'
+                      }`}
                   >
                     <div className="flex items-center gap-3">
                       <Icon className={`w-4 h-4 ${isActive ? 'text-[#EE3124]' : 'text-slate-400'}`} />
@@ -225,12 +221,11 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
 
                     {item.badge !== null && (
                       <span
-                        className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border ${
-                          item.badgeColor ||
+                        className={`px-2.5 py-0.5 text-[10px] font-extrabold rounded-full border ${item.badgeColor ||
                           (isActive
                             ? 'bg-[#EE3124]/10 text-[#EE3124] border-[#EE3124]/30'
                             : 'bg-slate-100 text-slate-500 border-slate-200/80')
-                        }`}
+                          }`}
                       >
                         {item.badge}
                       </span>

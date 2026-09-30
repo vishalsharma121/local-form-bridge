@@ -41,18 +41,22 @@ export default async function handler(req, res) {
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const contacts = (data.results || []).map((c) => ({
-                id: c.id,
-                firstname: c.properties.firstname || '',
-                lastname: c.properties.lastname || '',
-                name: `${c.properties.firstname || ''} ${c.properties.lastname || ''}`.trim() || 'Lead',
-                email: c.properties.email || '',
-                phone: c.properties.phone || '',
-                subject: c.properties.subject || '',
-                message: c.properties.message || '',
-                lead_source: c.properties.lead_source || sourcesMap[String(c.id)] || 'HubSpot / Unknown',
-                createdate: c.properties.createdate,
-            }));
+            const contacts = (data.results || []).map((c) => {
+                const fn = c.properties.firstname || '';
+                const ln = (c.properties.lastname === '-' ? '' : c.properties.lastname) || '';
+                return {
+                    id: c.id,
+                    firstname: fn,
+                    lastname: ln,
+                    name: `${fn} ${ln}`.trim() || 'Lead',
+                    email: c.properties.email || '',
+                    phone: c.properties.phone || '',
+                    subject: c.properties.subject || '',
+                    message: c.properties.message || '',
+                    lead_source: c.properties.lead_source || sourcesMap[String(c.id)] || 'HubSpot / Unknown',
+                    createdate: c.properties.createdate,
+                };
+            });
 
             return res.status(200).json({ contacts });
         } catch (err) {
@@ -87,7 +91,7 @@ export default async function handler(req, res) {
             }
 
             const [firstname, ...rest] = name.trim().split(/\s+/);
-            const lastname = rest.join(' ') || '-';
+            const lastname = rest.join(' ');
             const cleanEmail = email.trim();
 
             const token = getHubSpotToken();
@@ -111,14 +115,16 @@ export default async function handler(req, res) {
                 'Content-Type': 'application/json',
             };
 
+            const effectiveLeadSource = req.body?.leadSource || (req.headers['x-admin-key'] ? 'Admin Dashboard' : 'Website Form');
+
             const properties = {
                 firstname,
-                lastname,
+                lastname: lastname || '',
                 email: cleanEmail,
                 phone: phone || '',
                 subject: subject || '',
                 message: message || '',
-                lead_source: 'Website Form',
+                lead_source: effectiveLeadSource,
             };
 
             const safeFetch = async (url, opts) => {
@@ -251,7 +257,7 @@ export default async function handler(req, res) {
 
             const contactId = data.id;
             console.log(`✅ [API] Contact ${action} successful. ID: ${contactId}`);
-            await recordLeadSource(contactId, 'contact', 'Website Form');
+            await recordLeadSource(contactId, 'contact', effectiveLeadSource);
             logSyncActivity({
                 status: 'success',
                 type: 'contact',
@@ -684,6 +690,256 @@ export default async function handler(req, res) {
             return res.status(500).json({
                 error: 'Failed to create or update contact/company/deal.',
             });
+        }
+    }
+
+    if (req.method === 'PUT') {
+        try {
+            console.log('🐞 [API] /api/contacts (PUT) called');
+
+            const provided = req.headers['x-admin-key'];
+            if (!provided || provided !== process.env.ADMIN_KEY) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            const { id, name, email, phone, subject, message } = req.body || {};
+            const contactId = id || req.query?.id;
+
+            if (!contactId) {
+                return res.status(400).json({ error: 'Contact ID is required for updating.' });
+            }
+
+            const token = getHubSpotToken();
+            if (!token) {
+                return res.status(500).json({ error: MISSING_TOKEN_ERROR });
+            }
+
+            let firstname = '';
+            let lastname = '';
+            if (name) {
+                const parts = name.trim().split(/\s+/);
+                firstname = parts[0];
+                lastname = parts.slice(1).join(' ');
+            }
+
+            const properties = {};
+            if (firstname) properties.firstname = firstname;
+            if (name !== undefined) properties.lastname = lastname || '';
+            if (email) properties.email = email.trim();
+            if (phone !== undefined) properties.phone = phone;
+            if (subject !== undefined) properties.subject = subject;
+            if (message !== undefined) properties.message = message;
+
+            let oldRecord = {};
+            try {
+                const getOldRes = await fetch(
+                    `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}?properties=firstname,lastname,email,phone,subject,message`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (getOldRes.ok) {
+                    const getOldData = await getOldRes.json();
+                    oldRecord = getOldData.properties || {};
+                }
+            } catch (fetchErr) {
+                console.warn('⚠️ [API] Could not fetch old contact record:', fetchErr.message);
+            }
+
+            const diffParts = [];
+            const changes = {};
+
+            const oldFn = oldRecord.firstname || '';
+            const oldLn = (oldRecord.lastname === '-' ? '' : oldRecord.lastname) || '';
+            const oldFullName = `${oldFn} ${oldLn}`.trim();
+            const newFullName = name ? name.trim() : oldFullName;
+            if (newFullName && newFullName !== oldFullName) {
+                changes.name = { old: oldFullName || '—', new: newFullName };
+                diffParts.push(`Name ("${oldFullName || '—'}" → "${newFullName}")`);
+            }
+
+            const oldEmail = oldRecord.email || '';
+            const newEmail = email ? email.trim() : oldEmail;
+            if (newEmail && newEmail !== oldEmail) {
+                changes.email = { old: oldEmail || '—', new: newEmail };
+                diffParts.push(`Email ("${oldEmail || '—'}" → "${newEmail}")`);
+            }
+
+            const oldPhone = oldRecord.phone || '';
+            const newPhone = phone !== undefined ? phone.trim() : oldPhone;
+            if (newPhone !== oldPhone) {
+                changes.phone = { old: oldPhone || '—', new: newPhone || '—' };
+                diffParts.push(`Phone ("${oldPhone || '—'}" → "${newPhone || '—'}")`);
+            }
+
+            const oldSubject = oldRecord.subject || '';
+            const newSubject = subject !== undefined ? subject.trim() : oldSubject;
+            if (newSubject !== oldSubject) {
+                changes.subject = { old: oldSubject || '—', new: newSubject || '—' };
+                diffParts.push(`Subject ("${oldSubject || '—'}" → "${newSubject || '—'}")`);
+            }
+
+            const oldMsgPayload = oldRecord.message || '';
+            const newMsgPayload = message !== undefined ? message.trim() : oldMsgPayload;
+            if (newMsgPayload !== oldMsgPayload) {
+                changes.message = { old: oldMsgPayload || '—', new: newMsgPayload || '—' };
+                diffParts.push(`Message ("${oldMsgPayload || '—'}" → "${newMsgPayload || '—'}")`);
+            }
+
+            const diffSummary = diffParts.length > 0
+                ? `Contact updated: ${diffParts.join(', ')}`
+                : `Contact updated (ID: ${contactId}): No fields changed`;
+
+            const safeHubSpotPatch = async (url, token, initialProperties) => {
+                let propertiesToUpdate = { ...initialProperties };
+                
+                for (let attempt = 0; attempt < 5; attempt++) {
+                    let res = await fetch(url, {
+                        method: 'PATCH',
+                        headers: {
+                            Authorization: `Bearer ${token}`,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ properties: propertiesToUpdate }),
+                    });
+
+                    if (res.ok) return res;
+
+                    if (res.status === 400) {
+                        try {
+                            const cloned = res.clone();
+                            const errData = await cloned.json();
+                            const errStr = JSON.stringify(errData);
+                            
+                            let missingProperties = [];
+
+                            if (errData.errors && Array.isArray(errData.errors)) {
+                                errData.errors.forEach(e => {
+                                    if (e.code === 'PROPERTY_DOESNT_EXIST' && e.name) {
+                                        missingProperties.push(e.name);
+                                    }
+                                });
+                            }
+
+                            const propMatches = errStr.match(/Property \\?"?([a-zA-Z0-9_]+)\\?"? does not exist/gi) || [];
+                            propMatches.forEach(m => {
+                                const clean = m.replace(/Property \\?"?/i, '').replace(/\\?"? does not exist/i, '').trim();
+                                if (clean) missingProperties.push(clean);
+                            });
+
+                            const nameMatches = errStr.match(/"name"\s*:\s*\\?"([a-zA-Z0-9_]+)\\?"/gi) || [];
+                            nameMatches.forEach(m => {
+                                const clean = m.replace(/"name"\s*:\s*\\?"/i, '').replace(/\\?"$/, '').trim();
+                                if (clean) missingProperties.push(clean);
+                            });
+
+                            if (missingProperties.length > 0) {
+                                let removedAny = false;
+                                missingProperties.forEach(prop => {
+                                    if (propertiesToUpdate[prop] !== undefined) {
+                                        console.warn(`⚠️ [HubSpot Safety Net] Property "${prop}" does not exist in HubSpot portal. Stripping property and retrying...`);
+                                        delete propertiesToUpdate[prop];
+                                        removedAny = true;
+                                    }
+                                });
+                                if (removedAny) continue;
+                            }
+                            return res;
+                        } catch {
+                            return res;
+                        }
+                    }
+                    return res;
+                }
+            };
+
+            const response = await safeHubSpotPatch(
+                `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`,
+                token,
+                properties
+            );
+
+            const data = await response.json();
+            if (!response.ok) {
+                logSyncError({
+                    type: 'contact',
+                    operation: 'update',
+                    entityInfo: { contactId, email: newEmail, name: newFullName, changes },
+                    statusCode: response.status,
+                    errorMessage: data.message || 'Failed to update contact in HubSpot',
+                    details: data
+                });
+                return res.status(response.status).json(data);
+            }
+
+            logSyncActivity({
+                status: 'success',
+                type: 'contact',
+                operation: 'update',
+                entityInfo: { contactId, email: newEmail, name: newFullName, changes },
+                statusCode: response.status,
+                message: diffSummary,
+                details: { contactId, changes, data }
+            });
+
+            return res.status(200).json({ success: true, contact: data, changes });
+        } catch (err) {
+            console.error('🔥 [API] Edit contact error:', err);
+            return res.status(500).json({ error: err.message || 'Failed to update contact.' });
+        }
+    }
+
+    if (req.method === 'DELETE') {
+        try {
+            console.log('🐞 [API] /api/contacts (DELETE) called');
+
+            const provided = req.headers['x-admin-key'];
+            if (!provided || provided !== process.env.ADMIN_KEY) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            const contactId = req.query?.id || req.body?.id;
+            if (!contactId) {
+                return res.status(400).json({ error: 'Contact ID is required for deletion.' });
+            }
+
+            const token = getHubSpotToken();
+            if (!token) {
+                return res.status(500).json({ error: MISSING_TOKEN_ERROR });
+            }
+
+            const response = await fetch(`https://api.hubapi.com/crm/v3/objects/contacts/${contactId}`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+
+            if (!response.ok && response.status !== 204) {
+                const data = await response.json().catch(() => ({}));
+                logSyncError({
+                    type: 'contact',
+                    operation: 'delete',
+                    entityInfo: { contactId },
+                    statusCode: response.status,
+                    errorMessage: data.message || 'Failed to delete contact in HubSpot',
+                    details: data
+                });
+                return res.status(response.status).json(data);
+            }
+
+            logSyncActivity({
+                status: 'success',
+                type: 'contact',
+                operation: 'delete',
+                entityInfo: { contactId },
+                statusCode: 204,
+                message: `Contact deleted from HubSpot (ID: ${contactId})`,
+                details: null
+            });
+
+            return res.status(200).json({ success: true, message: 'Contact deleted successfully.' });
+        } catch (err) {
+            console.error('🔥 [API] Delete contact error:', err);
+            return res.status(500).json({ error: err.message || 'Failed to delete contact.' });
         }
     }
 
