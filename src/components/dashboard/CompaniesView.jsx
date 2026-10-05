@@ -18,6 +18,7 @@ import {
   Trash2,
   AlertTriangle
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export default function CompaniesView({
   companies = [],
@@ -26,6 +27,10 @@ export default function CompaniesView({
   onRefreshCompanies,
   adminKey
 }) {
+  const { getAuthHeaders, can } = useAuth();
+  const canCreate = can('create');
+  const canEdit = can('edit');
+  const canDelete = can('delete');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState('ALL');
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -65,10 +70,7 @@ export default function CompaniesView({
     try {
       const res = await fetch('/api/companies', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           id: editingCompany.id,
           name: editCompanyData.name.trim(),
@@ -104,9 +106,7 @@ export default function CompaniesView({
     try {
       const res = await fetch(`/api/companies?id=${deletingCompany.id}`, {
         method: 'DELETE',
-        headers: {
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        }
+        headers: getAuthHeaders()
       });
 
       const data = await res.json().catch(() => ({}));
@@ -165,10 +165,7 @@ export default function CompaniesView({
     try {
       const res = await fetch('/api/companies', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           name: newCompanyData.name.trim(),
           domain: newCompanyData.domain.trim(),
@@ -233,13 +230,15 @@ export default function CompaniesView({
             </select>
           </div>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center justify-center gap-2 shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Create HubSpot Company</span>
-          </button>
+          {canCreate && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center justify-center gap-2 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create HubSpot Company</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -334,46 +333,64 @@ export default function CompaniesView({
 
                       <td className="px-4 py-3.5 text-right">
                         <div className="flex items-center justify-end">
-                          <div className="inline-flex items-center gap-0.5 p-1 rounded-2xl bg-slate-100/80 border border-slate-200/80 shadow-2xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200">
-                            {c.domain && c.domain !== '—' && (
-                              <>
-                                <a
-                                  href={c.domain.startsWith('http') ? c.domain : `https://${c.domain}`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-[#EE3124] hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
-                                  title="Visit Website"
-                                >
-                                  <span>Visit</span>
-                                  <ExternalLink className="w-3 h-3 text-slate-400 group-hover/btn:text-[#EE3124] transition-colors" />
-                                </a>
-                                <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
-                              </>
-                            )}
+                          {(() => {
+                            const hasVisit = Boolean(c.domain && c.domain !== '—');
+                            const hasActions = hasVisit || canEdit || canDelete;
 
-                            <button
-                              onClick={() => handleStartEdit(c)}
-                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
-                              title="Edit Company"
-                            >
-                              <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
-                              <span className="hidden xl:inline">Edit</span>
-                            </button>
+                            if (!hasActions) {
+                              return <span className="text-slate-400 font-mono text-xs font-medium px-2 py-1">—</span>;
+                            }
 
-                            <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                            return (
+                              <div className="inline-flex items-center gap-0.5 p-1 rounded-2xl bg-slate-100/80 border border-slate-200/80 shadow-2xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200">
+                                {hasVisit && (
+                                  <a
+                                    href={c.domain.startsWith('http') ? c.domain : `https://${c.domain}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-[#EE3124] hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
+                                    title="Visit Website"
+                                  >
+                                    <span>Visit</span>
+                                    <ExternalLink className="w-3 h-3 text-slate-400 group-hover/btn:text-[#EE3124] transition-colors" />
+                                  </a>
+                                )}
 
-                            <button
-                              onClick={() => {
-                                setDeletingCompany(c);
-                                setActionError('');
-                                setActionSuccess('');
-                              }}
-                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
-                              title="Delete Company"
-                            >
-                              <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-rose-600 transition-colors" />
-                            </button>
-                          </div>
+                                {hasVisit && (canEdit || canDelete) && (
+                                  <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                                )}
+
+                                {canEdit && (
+                                  <button
+                                    onClick={() => handleStartEdit(c)}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
+                                    title="Edit Company"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
+                                    <span className="hidden xl:inline">Edit</span>
+                                  </button>
+                                )}
+
+                                {canEdit && canDelete && (
+                                  <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                                )}
+
+                                {canDelete && (
+                                  <button
+                                    onClick={() => {
+                                      setDeletingCompany(c);
+                                      setActionError('');
+                                      setActionSuccess('');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
+                                    title="Delete Company"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-rose-600 transition-colors" />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </td>
                     </tr>

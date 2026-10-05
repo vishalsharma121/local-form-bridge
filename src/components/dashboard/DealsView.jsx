@@ -16,6 +16,7 @@ import {
   AlertTriangle,
   Check
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export default function DealsView({
   deals = [],
@@ -26,6 +27,10 @@ export default function DealsView({
   onRefreshDeals,
   adminKey
 }) {
+  const { getAuthHeaders, can } = useAuth();
+  const canCreate = can('create');
+  const canEdit = can('edit');
+  const canDelete = can('delete');
   const [searchQuery, setSearchQuery] = useState('');
   const [pipelineFilter, setPipelineFilter] = useState('ALL');
   const [stageFilter, setStageFilter] = useState('ALL');
@@ -156,10 +161,7 @@ export default function DealsView({
     try {
       const res = await fetch('/api/deals', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           id: editingDeal.id,
           dealname: editDealData.dealname.trim(),
@@ -197,9 +199,7 @@ export default function DealsView({
     try {
       const res = await fetch(`/api/deals?id=${deletingDeal.id}`, {
         method: 'DELETE',
-        headers: {
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        }
+        headers: getAuthHeaders()
       });
 
       const data = await res.json().catch(() => ({}));
@@ -287,10 +287,7 @@ export default function DealsView({
       if (newDealData.companyName.trim()) {
         const compRes = await fetch('/api/companies', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-admin-key': activeAdminKey
-          },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             name: newDealData.companyName.trim(),
             domain: newDealData.companyDomain.trim(),
@@ -306,10 +303,7 @@ export default function DealsView({
       // Create Deal
       const dealRes = await fetch('/api/deals', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': activeAdminKey
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           dealname: newDealData.dealname.trim(),
           pipeline: newDealData.pipeline,
@@ -432,13 +426,15 @@ export default function DealsView({
             </select>
           </div>
 
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center justify-center gap-2 shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Create HubSpot Deal</span>
-          </button>
+          {canCreate && (
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center justify-center gap-2 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create HubSpot Deal</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -524,30 +520,40 @@ export default function DealsView({
 
                         <td className="px-4 py-3.5 text-right">
                           <div className="flex items-center justify-end">
-                            <div className="inline-flex items-center gap-0.5 p-1 rounded-2xl bg-slate-100/80 border border-slate-200/80 shadow-2xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200">
-                              <button
-                                onClick={() => handleStartEditDeal(d)}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
-                                title="Edit Deal"
-                              >
-                                <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
-                                <span>Edit</span>
-                              </button>
+                            {canEdit || canDelete ? (
+                              <div className="inline-flex items-center gap-0.5 p-1 rounded-2xl bg-slate-100/80 border border-slate-200/80 shadow-2xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200">
+                                {canEdit && (
+                                  <button
+                                    onClick={() => handleStartEditDeal(d)}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
+                                    title="Edit Deal"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
+                                    <span>Edit</span>
+                                  </button>
+                                )}
 
-                              <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                                {canEdit && canDelete && (
+                                  <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                                )}
 
-                              <button
-                                onClick={() => {
-                                  setDeletingDeal(d);
-                                  setActionError('');
-                                  setActionSuccess('');
-                                }}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
-                                title="Delete Deal"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-rose-600 transition-colors" />
-                              </button>
-                            </div>
+                                {canDelete && (
+                                  <button
+                                    onClick={() => {
+                                      setDeletingDeal(d);
+                                      setActionError('');
+                                      setActionSuccess('');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
+                                    title="Delete Deal"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-rose-600 transition-colors" />
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-mono text-xs font-medium px-2 py-1">—</span>
+                            )}
                           </div>
                         </td>
                       </tr>

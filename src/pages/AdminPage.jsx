@@ -10,23 +10,14 @@ import SettingsView from '../components/dashboard/SettingsView';
 import ErrorLogsView from '../components/dashboard/ErrorLogsView';
 import RetryQueueView from '../components/dashboard/RetryQueueView';
 import ActivityFeedView from '../components/dashboard/ActivityFeedView';
+import TeamMembersView from '../components/dashboard/TeamMembersView';
+import LoginModal from '../components/LoginModal';
+import { AuthProvider, useAuth } from '../context/AuthContext';
 import { filterByDateRange } from '../utils/dateFilterUtils';
-import { 
-  ShieldCheck, 
-  Key, 
-  ArrowRight, 
-  AlertCircle, 
-  MessageSquare,
-  Eye,
-  EyeOff
-} from 'lucide-react';
-import { Link } from 'react-router-dom';
 
-export default function AdminPage() {
-  const [key, setKey] = useState(() => sessionStorage.getItem('admin_key') || '');
-  const [inputKey, setInputKey] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  
+function AdminDashboardContent() {
+  const { user, loading: authLoading, getAuthHeaders, logout, isSuperAdmin } = useAuth();
+
   // Data states
   const [contacts, setContacts] = useState([]);
   const [companies, setCompanies] = useState([]);
@@ -43,7 +34,7 @@ export default function AdminPage() {
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [syncSuccess, setSyncSuccess] = useState(false);
 
-  // Date Range Filter State (persisted in sessionStorage)
+  // Date Range Filter State
   const [dateRange, setDateRangeState] = useState(() => sessionStorage.getItem('date_range') || 'all');
   const [customStart, setCustomStartState] = useState(() => sessionStorage.getItem('custom_start') || '');
   const [customEnd, setCustomEndState] = useState(() => sessionStorage.getItem('custom_end') || '');
@@ -63,7 +54,7 @@ export default function AdminPage() {
     setCustomEndState(val);
   };
 
-  // Filtered Datasets based on selected Date Range
+  // Filtered Datasets
   const filteredContacts = useMemo(() => {
     return filterByDateRange(contacts, 'createdate', dateRange, customStart, customEnd);
   }, [contacts, dateRange, customStart, customEnd]);
@@ -93,23 +84,18 @@ export default function AdminPage() {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContact, setSelectedContact] = useState(null);
-
-
   const [initialLoading, setInitialLoading] = useState(true);
 
-  // --------------------------------------------------
   // LOAD DATA FROM HUBSPOT & ERROR LOG APIs
-  // --------------------------------------------------
-  const loadContacts = useCallback(async (adminKey, silent = false) => {
+  const loadContacts = useCallback(async (silent = false) => {
     setError(null);
     try {
       const res = await fetch('/api/contacts', {
-        headers: { 'x-admin-key': adminKey },
+        headers: getAuthHeaders(),
       });
       if (res.status === 401) {
-        sessionStorage.removeItem('admin_key');
-        setKey('');
-        throw new Error('Invalid admin key. Please check credentials and try again.');
+        logout();
+        throw new Error('Session expired. Please log in again.');
       }
       if (!res.ok) throw new Error('Failed to load contacts data');
       const data = await res.json();
@@ -120,12 +106,12 @@ export default function AdminPage() {
       if (!silent) setError(err.message);
       return null;
     }
-  }, []);
+  }, [getAuthHeaders, logout]);
 
-  const loadCompanies = useCallback(async (adminKey) => {
+  const loadCompanies = useCallback(async () => {
     try {
       const res = await fetch('/api/companies', {
-        headers: { 'x-admin-key': adminKey },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -136,12 +122,12 @@ export default function AdminPage() {
       console.warn('Failed to load companies:', err);
     }
     return null;
-  }, []);
+  }, [getAuthHeaders]);
 
-  const loadDeals = useCallback(async (adminKey) => {
+  const loadDeals = useCallback(async () => {
     try {
       const res = await fetch('/api/deals', {
-        headers: { 'x-admin-key': adminKey },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -153,40 +139,29 @@ export default function AdminPage() {
       console.warn('Failed to load deals:', err);
     }
     return null;
-  }, []);
+  }, [getAuthHeaders]);
 
-  const loadErrorLogs = useCallback(async (adminKey) => {
-    const activeKey = adminKey || key || sessionStorage.getItem('admin_key') || '';
+  const loadErrorLogs = useCallback(async () => {
     try {
       const res = await fetch('/api/sync-errors', {
-        headers: { 'x-admin-key': activeKey },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
         setErrorLogs(data.logs || []);
         return data;
-      } else {
-        const fallbackRes = await fetch('/api/error-logs', {
-          headers: { 'x-admin-key': activeKey },
-        });
-        if (fallbackRes.ok) {
-          const data = await fallbackRes.json();
-          setErrorLogs(data.logs || []);
-          return data;
-        }
       }
     } catch (err) {
       console.warn('Failed to load error logs:', err);
     }
     return null;
-  }, [key]);
+  }, [getAuthHeaders]);
 
   const clearErrorLogsAPI = useCallback(async () => {
-    if (!key) return;
     try {
       const res = await fetch('/api/sync-errors', {
         method: 'DELETE',
-        headers: { 'x-admin-key': key },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         setErrorLogs([]);
@@ -194,12 +169,12 @@ export default function AdminPage() {
     } catch (err) {
       console.error('Failed to clear error logs:', err);
     }
-  }, [key]);
+  }, [getAuthHeaders]);
 
-  const loadActivityLogs = useCallback(async (adminKey) => {
+  const loadActivityLogs = useCallback(async () => {
     try {
       const res = await fetch('/api/sync-activity', {
-        headers: { 'x-admin-key': adminKey },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -210,14 +185,13 @@ export default function AdminPage() {
       console.warn('Failed to load activity logs:', err);
     }
     return null;
-  }, []);
+  }, [getAuthHeaders]);
 
   const clearActivityLogsAPI = useCallback(async () => {
-    if (!key) return;
     try {
       const res = await fetch('/api/sync-activity', {
         method: 'DELETE',
-        headers: { 'x-admin-key': key },
+        headers: getAuthHeaders(),
       });
       if (res.ok) {
         setActivities([]);
@@ -225,36 +199,34 @@ export default function AdminPage() {
     } catch (err) {
       console.error('Failed to clear activity logs:', err);
     }
-  }, [key]);
+  }, [getAuthHeaders]);
 
-  const triggerAutoRetry = useCallback(async (adminKey) => {
-    const activeKey = adminKey || key || sessionStorage.getItem('admin_key') || '';
-    if (!activeKey) return;
+  const triggerAutoRetry = useCallback(async () => {
     try {
       const res = await fetch('/api/cron-auto-retry', {
-        headers: { 'x-admin-key': activeKey }
+        headers: getAuthHeaders()
       });
       if (res.ok) {
         const data = await res.json();
         if (data.processed > 0) {
-          loadErrorLogs(activeKey);
-          loadActivityLogs(activeKey);
+          loadErrorLogs();
+          loadActivityLogs();
         }
       }
     } catch (err) {
       console.warn('Auto-retry trigger error:', err);
     }
-  }, [key, loadErrorLogs, loadActivityLogs]);
+  }, [getAuthHeaders, loadErrorLogs, loadActivityLogs]);
 
-  const loadAllData = useCallback(async (adminKey, silent = false) => {
+  const loadAllData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
       await Promise.allSettled([
-        loadContacts(adminKey, silent),
-        loadCompanies(adminKey),
-        loadDeals(adminKey),
-        loadErrorLogs(adminKey),
-        loadActivityLogs(adminKey)
+        loadContacts(silent),
+        loadCompanies(),
+        loadDeals(),
+        loadErrorLogs(),
+        loadActivityLogs()
       ]);
     } catch (err) {
       console.warn('Sync load error:', err);
@@ -266,34 +238,24 @@ export default function AdminPage() {
 
   const pollCountRef = useRef(0);
 
-  // --------------------------------------------------
-  // LIVE AUTO-SYNC COUNTDOWN (10, 09, 08... 00 -> Sync -> 10)
-  // --------------------------------------------------
+  // Initial load when user logs in
   useEffect(() => {
-    if (!key) return;
+    if (!user) return;
+    loadAllData(false);
+    triggerAutoRetry();
+  }, [user, loadAllData, triggerAutoRetry]);
 
-    // Initial load asynchronously
-    const initFetch = async () => {
-      loadAllData(key, false);
-      triggerAutoRetry(key);
-    };
-    initFetch();
-  }, [key, loadAllData, triggerAutoRetry]);
-
+  // LIVE AUTO-SYNC COUNTDOWN
   useEffect(() => {
-    if (!key || !autoSync) {
-      return;
-    }
+    if (!user || !autoSync) return;
 
-    // 1 second countdown interval
     const timer = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
-          loadAllData(key, true);
+          loadAllData(true);
           pollCountRef.current += 1;
-          // Trigger auto-retry check roughly every 60s (every 6th 10-second tick)
           if (pollCountRef.current % 6 === 0) {
-            triggerAutoRetry(key);
+            triggerAutoRetry();
           }
           return 10;
         }
@@ -301,10 +263,9 @@ export default function AdminPage() {
       });
     }, 1000);
 
-    // Instant update when switching tab back from HubSpot to our app
     const handleFocus = () => {
-      loadAllData(key, true);
-      triggerAutoRetry(key);
+      loadAllData(true);
+      triggerAutoRetry();
       setCountdown(10);
     };
     window.addEventListener('focus', handleFocus);
@@ -313,11 +274,11 @@ export default function AdminPage() {
       clearInterval(timer);
       window.removeEventListener('focus', handleFocus);
     };
-  }, [key, autoSync, loadAllData, triggerAutoRetry]);
+  }, [user, autoSync, loadAllData, triggerAutoRetry]);
 
   const handleManualRefresh = async () => {
     setSyncSuccess(false);
-    loadAllData(key, false);
+    loadAllData(false);
     setCountdown(10);
     setTimeout(() => {
       setSyncSuccess(true);
@@ -325,176 +286,75 @@ export default function AdminPage() {
     }, 400);
   };
 
-  // --------------------------------------------------
-  // HANDLERS
-  // --------------------------------------------------
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (!inputKey.trim()) return;
-    sessionStorage.setItem('admin_key', inputKey.trim());
-    setKey(inputKey.trim());
-  };
+  // Export CSV Helper
+  const handleExportCSV = (dataList = contacts, filename = 'hubspot-export.csv') => {
+    if (!dataList || dataList.length === 0) return;
 
-  const handleLogout = () => {
-    sessionStorage.removeItem('admin_key');
-    setKey('');
-    setInputKey('');
-  };
+    const headers = Object.keys(dataList[0] || {}).join(',');
+    const rows = dataList.map((item) =>
+      Object.values(item)
+        .map((val) => `"${String(val || '').replace(/"/g, '""')}"`)
+        .join(',')
+    );
 
-  const handleUpdateKey = (newAdminKey) => {
-    sessionStorage.setItem('admin_key', newAdminKey);
-    setKey(newAdminKey);
-    loadAllData(newAdminKey, false);
-    setCountdown(10);
-  };
-
-  // CSV Export Helper
-  const handleExportCSV = () => {
-    if (contacts.length === 0) return;
-
-    const headers = ['ID', 'Name', 'Email', 'Phone', 'Subject', 'Message', 'Created Date'];
-    const rows = contacts.map(c => [
-      `"${(c.id || '').replace(/"/g, '""')}"`,
-      `"${(c.name || '').replace(/"/g, '""')}"`,
-      `"${(c.email || '').replace(/"/g, '""')}"`,
-      `"${(c.phone || '').replace(/"/g, '""')}"`,
-      `"${(c.subject || '').replace(/"/g, '""')}"`,
-      `"${(c.message || '').replace(/"/g, '""')}"`,
-      `"${c.createdate ? new Date(c.createdate).toLocaleString() : ''}"`
-    ]);
-
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers, ...rows].join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `form_bridge_contacts_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  // --------------------------------------------------
-  // LOGIN SCREEN (WHEN NOT AUTHENTICATED)
-  // --------------------------------------------------
-  if (!key) {
+  // Auth loading state
+  if (authLoading) {
     return (
-      <div className="min-h-screen bg-[#f4f6fa] text-slate-800 flex items-center justify-center p-4 relative overflow-hidden font-sans">
-        {/* Soft Glow Accents */}
-        <div className="absolute -top-40 -left-40 w-96 h-96 bg-[#F7941D]/10 rounded-full blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-[#EE3124]/10 rounded-full blur-3xl pointer-events-none"></div>
-
-        <div className="w-full max-w-md relative z-10">
-          <div className="bg-white border border-slate-200/80 rounded-3xl p-8 shadow-xl space-y-6">
-            {/* Header Brand */}
-            <div className="text-center space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-[#F7941D] to-[#EE3124] flex items-center justify-center mx-auto text-white shadow-lg shadow-orange-500/20">
-                <ShieldCheck className="w-7 h-7" />
-              </div>
-
-              <div>
-                <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
-                  Admin Dashboard Login
-                </h1>
-                <p className="text-xs text-slate-500 mt-1 font-medium">
-                  Enter your secure admin authorization key
-                </p>
-              </div>
-            </div>
-
-            {/* Login Form */}
-            <form onSubmit={handleLogin} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1.5">
-                  Admin Key
-                </label>
-                <div className="relative">
-                  <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400">
-                    <Key className="w-4 h-4" />
-                  </div>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Enter security key..."
-                    value={inputKey}
-                    onChange={(e) => setInputKey(e.target.value)}
-                    className="w-full pl-10 pr-10 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/30 focus:border-[#EE3124] focus:bg-white transition-all shadow-inner"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white font-bold text-sm shadow-md shadow-orange-600/20 transition-all flex items-center justify-center gap-2 group cursor-pointer"
-              >
-                <span>Authorize & Enter</span>
-                <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </button>
-
-              {error && (
-                <div className="p-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2 animate-fade-in">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
-                  <span>{error}</span>
-                </div>
-              )}
-            </form>
-
-            {/* Back to Public Form */}
-            <div className="pt-4 border-t border-slate-100 text-center">
-              <Link
-                to="/"
-                className="text-xs text-slate-500 hover:text-[#EE3124] font-bold transition-colors inline-flex items-center gap-1.5"
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>Return to Public Contact Form</span>
-              </Link>
-            </div>
+      <div className="min-h-screen bg-[#f4f6fa] flex items-center justify-center p-4 font-sans antialiased">
+        <div className="bg-white/80 backdrop-blur-md rounded-3xl p-8 border border-slate-200/80 shadow-[0_4px_25px_rgba(0,0,0,0.03)] flex flex-col items-center gap-4 max-w-xs w-full animate-fade-in">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#F7941D] to-[#EE3124] text-white flex items-center justify-center shadow-md shadow-orange-500/20">
+            <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          </div>
+          <div className="text-center space-y-1">
+            <h3 className="font-extrabold text-sm text-slate-900">StarkEdge Bridge</h3>
+            <p className="text-xs text-slate-500 font-medium">Verifying session credentials...</p>
           </div>
         </div>
       </div>
     );
   }
 
-  // --------------------------------------------------
-  // MAIN DASHBOARD (AUTHENTICATED)
-  // --------------------------------------------------
+  // Unauthenticated user -> Show Login Modal
+  if (!user) {
+    return <LoginModal />;
+  }
+
   return (
-    <div className="min-h-screen bg-[#f4f6fa] text-slate-800 flex flex-col lg:flex-row gap-0 lg:gap-5 font-sans transition-colors">
-      {/* Sidebar Navigation */}
+    <div className="min-h-screen bg-[#f4f6fa] text-slate-800 flex flex-col lg:flex-row gap-0 lg:gap-5 font-sans transition-colors antialiased selection:bg-[#EE3124]/10 selection:text-[#EE3124]">
+      {/* Sidebar navigation */}
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        contactsCount={contacts.length}
-        companiesCount={companies.length}
-        dealsCount={deals.length}
+        contactsCount={filteredContacts.length}
+        companiesCount={filteredCompanies.length}
+        dealsCount={filteredDeals.length}
         errorLogsCount={unresolvedErrorLogsCount}
         retryQueueCount={unresolvedErrorLogsCount}
-        onLogout={handleLogout}
+        onLogout={logout}
         isMobileOpen={isMobileOpen}
         setIsMobileOpen={setIsMobileOpen}
         initialLoading={initialLoading}
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
-        {/* Top Header */}
+      <div className="flex-1 flex flex-col min-w-0">
         <Header
           activeTab={activeTab}
           onRefresh={handleManualRefresh}
           loading={loading}
           searchQuery={searchQuery}
-          setSearchQuery={(q) => {
-            setSearchQuery(q);
-            if (activeTab !== 'contacts' && activeTab !== 'companies' && activeTab !== 'deals' && activeTab !== 'error-logs') {
-              setActiveTab('contacts');
-            }
-          }}
-          onLogout={handleLogout}
+          setSearchQuery={setSearchQuery}
+          onLogout={logout}
           setIsMobileOpen={setIsMobileOpen}
           autoSync={autoSync}
           setAutoSync={setAutoSync}
@@ -510,7 +370,7 @@ export default function AdminPage() {
         />
 
         {/* Dynamic View Body */}
-        <main className="flex-1 p-4 sm:p-6 lg:py-6 lg:px-0 lg:pr-5 w-full">
+        <main className="flex-1 p-4 sm:p-6 lg:pt-5 lg:pb-3 lg:px-0 lg:pr-5 w-full">
           {activeTab === 'overview' && (
             <OverviewView
               contacts={filteredContacts}
@@ -539,8 +399,7 @@ export default function AdminPage() {
               onExportCSV={handleExportCSV}
               selectedContact={selectedContact}
               setSelectedContact={setSelectedContact}
-              onRefreshContacts={() => loadContacts(key, false)}
-              adminKey={key}
+              onRefreshContacts={() => loadContacts(false)}
             />
           )}
 
@@ -549,8 +408,7 @@ export default function AdminPage() {
               companies={filteredCompanies}
               loading={loading}
               error={error}
-              onRefreshCompanies={() => loadCompanies(key, false)}
-              adminKey={key}
+              onRefreshCompanies={() => loadCompanies()}
             />
           )}
 
@@ -561,8 +419,7 @@ export default function AdminPage() {
               loading={loading}
               error={error}
               contacts={filteredContacts}
-              onRefreshDeals={() => loadDeals(key, false)}
-              adminKey={key}
+              onRefreshDeals={() => loadDeals()}
             />
           )}
 
@@ -571,7 +428,7 @@ export default function AdminPage() {
               errorLogs={filteredErrorLogs}
               loading={loading}
               error={error}
-              onRefreshLogs={() => loadErrorLogs(key, false)}
+              onRefreshLogs={() => loadErrorLogs()}
               onClearLogs={clearErrorLogsAPI}
             />
           )}
@@ -580,8 +437,7 @@ export default function AdminPage() {
             <RetryQueueView
               errorLogs={filteredErrorLogs}
               loading={loading}
-              adminKey={key}
-              onRefreshLogs={() => loadErrorLogs(key, false)}
+              onRefreshLogs={() => loadErrorLogs()}
             />
           )}
 
@@ -590,22 +446,32 @@ export default function AdminPage() {
               activities={filteredActivities}
               loading={loading}
               error={error}
-              onRefreshActivities={() => loadActivityLogs(key)}
+              onRefreshActivities={() => loadActivityLogs()}
               onClearActivities={clearActivityLogsAPI}
             />
           )}
 
+          {activeTab === 'team-members' && isSuperAdmin && (
+            <TeamMembersView />
+          )}
+
           {activeTab === 'preview' && <FormPreviewView />}
 
-          {activeTab === 'settings' && (
+          {activeTab === 'settings' && isSuperAdmin && (
             <SettingsView
-              adminKey={key}
-              onUpdateKey={handleUpdateKey}
-              onLogout={handleLogout}
+              onLogout={logout}
             />
           )}
         </main>
       </div>
     </div>
+  );
+}
+
+export default function AdminPage() {
+  return (
+    <AuthProvider>
+      <AdminDashboardContent />
+    </AuthProvider>
   );
 }

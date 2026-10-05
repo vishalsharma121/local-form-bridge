@@ -3,16 +3,18 @@ import { getLeadSourcesMap, recordLeadSource } from '../lib/leadSourceTracker.js
 import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
 import { getAppSetting } from '../lib/appSettings.js';
+import { authenticateRequest } from '../lib/userAuth.js';
+import { can } from '../lib/permissions.js';
 
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
             console.log('🐞 [API] /api/contacts (GET) called');
 
-            const provided = req.headers['x-admin-key'];
-            if (!provided || provided !== process.env.ADMIN_KEY) {
+            const auth = authenticateRequest(req);
+            if (!auth.authenticated || !can(auth.user?.role, 'view')) {
                 console.log('❌ [API] Unauthorized admin request');
-                return res.status(401).json({ error: 'Unauthorized' });
+                return res.status(401).json({ error: 'Unauthorized. Please log in.' });
             }
 
             const token = getHubSpotToken();
@@ -129,24 +131,49 @@ export default async function handler(req, res) {
 
             const safeFetch = async (url, opts) => {
                 let res = await fetch(url, opts);
-                if (!res.ok && res.status === 400) {
+                let attempts = 0;
+                while (!res.ok && res.status === 400 && attempts < 3) {
+                    attempts++;
                     try {
                         const cloned = res.clone();
                         const errData = await cloned.json();
-                        if (errData.message?.includes('PROPERTY_DOESNT_EXIST') || errData.errors?.some(e => e.code === 'PROPERTY_DOESNT_EXIST')) {
-                            console.warn('⚠️ [HubSpot Safety Net] Property "lead_source" does not exist in HubSpot portal. Retrying request without lead_source property...');
-                            if (opts.body) {
-                                const parsed = JSON.parse(opts.body);
-                                if (parsed.properties && parsed.properties.lead_source) {
-                                    delete parsed.properties.lead_source;
+                        const missingProps = new Set();
+
+                        if (errData.errors && Array.isArray(errData.errors)) {
+                            for (const e of errData.errors) {
+                                if (e.code === 'PROPERTY_DOESNT_EXIST') {
+                                    if (e.name) missingProps.add(e.name);
+                                    const match = e.message?.match(/Property "([^"]+)" does not exist/);
+                                    if (match && match[1]) missingProps.add(match[1]);
+                                }
+                            }
+                        }
+
+                        const mainMatch = errData.message?.match(/Property "([^"]+)" does not exist/);
+                        if (mainMatch && mainMatch[1]) missingProps.add(mainMatch[1]);
+
+                        if (missingProps.size > 0 && opts.body) {
+                            const parsed = JSON.parse(opts.body);
+                            if (parsed.properties) {
+                                let modified = false;
+                                for (const prop of missingProps) {
+                                    if (parsed.properties[prop] !== undefined) {
+                                        console.warn(`⚠️ [HubSpot Safety Net] Property "${prop}" does not exist in HubSpot portal. Retrying without "${prop}"...`);
+                                        delete parsed.properties[prop];
+                                        modified = true;
+                                    }
+                                }
+                                if (modified) {
                                     opts.body = JSON.stringify(parsed);
                                     res = await fetch(url, opts);
+                                    continue;
                                 }
                             }
                         }
                     } catch {
                         // Ignore parse errors
                     }
+                    break;
                 }
                 return res;
             };
@@ -693,13 +720,16 @@ export default async function handler(req, res) {
         }
     }
 
-    if (req.method === 'PUT') {
+    if (req.method === 'PATCH' || req.method === 'PUT') {
         try {
-            console.log('🐞 [API] /api/contacts (PUT) called');
+            console.log(`🐞 [API] /api/contacts (${req.method}) called`);
 
-            const provided = req.headers['x-admin-key'];
-            if (!provided || provided !== process.env.ADMIN_KEY) {
+            const auth = authenticateRequest(req);
+            if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
+            }
+            if (!can(auth.user?.role, 'edit')) {
+                return res.status(403).json({ error: 'Permission denied. Your role cannot edit contacts.' });
             }
 
             const { id, name, email, phone, subject, message } = req.body || {};
@@ -857,9 +887,9 @@ export default async function handler(req, res) {
                 properties
             );
 
-            const data = await response.json();
+            const data = await response.json().catch(() => ({}));
             if (!response.ok) {
-                logSyncError({
+                await logSyncError({
                     type: 'contact',
                     operation: 'update',
                     entityInfo: { contactId, email: newEmail, name: newFullName, changes },
@@ -867,10 +897,19 @@ export default async function handler(req, res) {
                     errorMessage: data.message || 'Failed to update contact in HubSpot',
                     details: data
                 });
+                await logSyncActivity({
+                    status: 'failure',
+                    type: 'contact',
+                    operation: 'update',
+                    entityInfo: { contactId, email: newEmail, name: newFullName, changes },
+                    statusCode: response.status,
+                    message: data.message || 'Failed to update contact in HubSpot',
+                    details: data
+                });
                 return res.status(response.status).json(data);
             }
 
-            logSyncActivity({
+            await logSyncActivity({
                 status: 'success',
                 type: 'contact',
                 operation: 'update',
@@ -883,6 +922,24 @@ export default async function handler(req, res) {
             return res.status(200).json({ success: true, contact: data, changes });
         } catch (err) {
             console.error('🔥 [API] Edit contact error:', err);
+            const fallbackId = req.body?.id || req.query?.id;
+            await logSyncError({
+                type: 'contact',
+                operation: 'update',
+                entityInfo: { contactId: fallbackId, email: req.body?.email, name: req.body?.name },
+                statusCode: 500,
+                errorMessage: err.message || 'Failed to update contact.',
+                details: null
+            });
+            await logSyncActivity({
+                status: 'failure',
+                type: 'contact',
+                operation: 'update',
+                entityInfo: { contactId: fallbackId, email: req.body?.email, name: req.body?.name },
+                statusCode: 500,
+                message: err.message || 'Failed to update contact.',
+                details: null
+            });
             return res.status(500).json({ error: err.message || 'Failed to update contact.' });
         }
     }
@@ -891,9 +948,12 @@ export default async function handler(req, res) {
         try {
             console.log('🐞 [API] /api/contacts (DELETE) called');
 
-            const provided = req.headers['x-admin-key'];
-            if (!provided || provided !== process.env.ADMIN_KEY) {
+            const auth = authenticateRequest(req);
+            if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
+            }
+            if (!can(auth.user?.role, 'delete')) {
+                return res.status(403).json({ error: 'Permission denied. Your role cannot delete contacts.' });
             }
 
             const contactId = req.query?.id || req.body?.id;
@@ -915,7 +975,7 @@ export default async function handler(req, res) {
 
             if (!response.ok && response.status !== 204) {
                 const data = await response.json().catch(() => ({}));
-                logSyncError({
+                await logSyncError({
                     type: 'contact',
                     operation: 'delete',
                     entityInfo: { contactId },
@@ -923,10 +983,19 @@ export default async function handler(req, res) {
                     errorMessage: data.message || 'Failed to delete contact in HubSpot',
                     details: data
                 });
+                await logSyncActivity({
+                    status: 'failure',
+                    type: 'contact',
+                    operation: 'delete',
+                    entityInfo: { contactId },
+                    statusCode: response.status,
+                    message: data.message || 'Failed to delete contact in HubSpot',
+                    details: data
+                });
                 return res.status(response.status).json(data);
             }
 
-            logSyncActivity({
+            await logSyncActivity({
                 status: 'success',
                 type: 'contact',
                 operation: 'delete',
@@ -939,6 +1008,24 @@ export default async function handler(req, res) {
             return res.status(200).json({ success: true, message: 'Contact deleted successfully.' });
         } catch (err) {
             console.error('🔥 [API] Delete contact error:', err);
+            const fallbackId = req.query?.id || req.body?.id;
+            await logSyncError({
+                type: 'contact',
+                operation: 'delete',
+                entityInfo: { contactId: fallbackId },
+                statusCode: 500,
+                errorMessage: err.message || 'Failed to delete contact.',
+                details: null
+            });
+            await logSyncActivity({
+                status: 'failure',
+                type: 'contact',
+                operation: 'delete',
+                entityInfo: { contactId: fallbackId },
+                statusCode: 500,
+                message: err.message || 'Failed to delete contact.',
+                details: null
+            });
             return res.status(500).json({ error: err.message || 'Failed to delete contact.' });
         }
     }

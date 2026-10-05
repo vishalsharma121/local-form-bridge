@@ -11,12 +11,21 @@ import {
   LogOut,
   ExternalLink,
   Sparkles,
+  UserCheck,
   X
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import StarkEdgeLogo from '../StarkEdgeLogo';
+import { useAuth } from '../../context/AuthContext';
 
 export default function Sidebar({ activeTab, setActiveTab, contactsCount, companiesCount, dealsCount, errorLogsCount, retryQueueCount, onLogout, isMobileOpen, setIsMobileOpen, initialLoading }) {
+  const { user, isSuperAdmin, logout } = useAuth();
+
+  const handleLogoutClick = () => {
+    logout();
+    if (onLogout) onLogout();
+  };
+
   const mainNavItems = [
     {
       id: 'overview',
@@ -52,6 +61,14 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
 
   const systemNavItems = [
     {
+      id: 'activity-feed',
+      label: 'Activity Feed',
+      icon: Activity,
+      badge: 'Live',
+      badgeColor: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+      description: 'Sync Stream Log'
+    },
+    {
       id: 'error-logs',
       label: 'Sync Error History',
       icon: ShieldAlert,
@@ -67,14 +84,14 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
       badgeColor: retryQueueCount > 0 ? 'bg-orange-500/10 text-orange-600 border-orange-200 animate-pulse' : 'bg-slate-100 text-slate-500 border-slate-200',
       description: 'Re-sync Operations'
     },
-    {
-      id: 'activity-feed',
-      label: 'Activity Feed',
-      icon: Activity,
-      badge: 'Live',
-      badgeColor: 'bg-emerald-50 text-emerald-600 border-emerald-200',
-      description: 'Sync Stream Log'
-    },
+    ...(isSuperAdmin ? [{
+      id: 'team-members',
+      label: 'Team Members & Roles',
+      icon: UserCheck,
+      badge: 'Admin',
+      badgeColor: 'bg-purple-50 text-purple-600 border-purple-200 font-bold',
+      description: 'Access Control'
+    }] : []),
     {
       id: 'preview',
       label: 'Live Form Tester',
@@ -83,14 +100,23 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
       badgeColor: 'bg-emerald-50 text-emerald-600 border-emerald-200',
       description: 'Form Showcase'
     },
-    {
+    ...(isSuperAdmin ? [{
       id: 'settings',
       label: 'Settings & API',
       icon: Settings,
       badge: null,
       description: 'Diagnostics'
-    }
+    }] : [])
   ];
+
+  const getRoleLabel = (role) => {
+    switch (role) {
+      case 'super_admin': return 'Super Admin';
+      case 'admin': return 'Admin';
+      case 'viewer': return 'Viewer';
+      default: return 'User';
+    }
+  };
 
   return (
     <>
@@ -102,7 +128,7 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
         />
       )}
 
-      {/* Floating Figma-Style White Sidebar Card Container */}
+      {/* Floating White Sidebar Card */}
       <aside
         className={`fixed top-0 bottom-0 left-0 z-50 w-72 bg-white text-slate-700 flex flex-col justify-between transition-transform duration-300 ease-in-out lg:sticky lg:top-5 lg:h-[calc(100vh-2.5rem)] lg:translate-x-0 lg:my-5 lg:ml-5 lg:rounded-3xl lg:shadow-[0_4px_24px_rgba(0,0,0,0.03)] lg:border lg:border-slate-200/80 overflow-hidden shrink-0 ${isMobileOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'
           }`}
@@ -237,25 +263,36 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
           </div>
         </div>
 
-        {/* Footer Account & Logout */}
-        <div className="p-3.5 m-3 rounded-2xl bg-slate-50/80 border border-slate-200/60 shrink-0">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#F7941D] to-[#EE3124] flex items-center justify-center font-bold text-white text-xs shadow-md shadow-orange-500/20 shrink-0">
-                SE
+        {/* Executive Light Sidebar User Profile Card */}
+        <div className="p-3 m-3 rounded-2xl bg-gradient-to-r from-slate-50 via-orange-50/20 to-slate-50 border border-slate-200/80 hover:border-orange-200 hover:shadow-sm transition-all duration-300 group shrink-0">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {/* Initials Avatar */}
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#F7941D] to-[#EE3124] flex items-center justify-center font-black text-white text-xs shadow-2xs shrink-0 group-hover:scale-105 transition-transform">
+                {user?.name 
+                  ? user.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() 
+                  : 'A'}
               </div>
-              <div className="overflow-hidden">
-                <div className="text-xs font-extrabold text-slate-800 truncate">Administrator</div>
-                <div className="text-[10px] text-emerald-600 flex items-center gap-1 font-bold">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> Authenticated
+
+              {/* User Details */}
+              <div className="overflow-hidden min-w-0">
+                <div className="text-xs font-extrabold text-slate-900 truncate group-hover:text-[#EE3124] transition-colors">
+                  {user?.name || 'Admin User'}
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                  <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 uppercase tracking-wider whitespace-nowrap">
+                    {getRoleLabel(user?.role)}
+                  </span>
                 </div>
               </div>
             </div>
 
+            {/* Logout Action */}
             <button
-              onClick={onLogout}
+              onClick={handleLogoutClick}
               title="Logout Session"
-              className="p-2 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition-colors shrink-0"
+              className="p-2 rounded-xl text-slate-400 hover:text-[#EE3124] hover:bg-orange-50 hover:border-orange-200 transition-all shrink-0 cursor-pointer border border-transparent"
             >
               <LogOut className="w-4 h-4" />
             </button>

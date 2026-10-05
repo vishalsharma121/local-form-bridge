@@ -1,19 +1,19 @@
 import { getPendingAutoRetryLogs, recordAutoRetryAttempt } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
 import { executeRetryForLog } from '../lib/retryEngine.js';
+import { authenticateRequest } from '../lib/userAuth.js';
+import { can } from '../lib/permissions.js';
 
 // In-memory throttle to prevent overlapping executions when multiple dashboard tabs are open
 let lastAutoRetryTimestamp = 0;
 const MIN_INTERVAL_MS = 45000; // Minimum 45-second gap between auto-retry runs
 
 export default async function handler(req, res) {
-    // 1. Auth Guard (x-admin-key header validation)
-    const adminKey = req.headers['x-admin-key'];
-    const expectedKey = process.env.ADMIN_KEY || process.env.ADMIN_SECRET || 'secret';
-
-    if (!adminKey || adminKey !== expectedKey) {
+    // 1. Auth Guard (JWT or Admin Key verification)
+    const auth = authenticateRequest(req);
+    if (!auth.authenticated || !can(auth.user?.role, 'view')) {
         console.warn('❌ [Auto-Retry] Unauthorized trigger attempt');
-        return res.status(401).json({ success: false, error: 'Unauthorized: Invalid admin key' });
+        return res.status(401).json({ success: false, error: 'Unauthorized: Please log in.' });
     }
 
     // 2. Throttle Check for Overlapping Tabs

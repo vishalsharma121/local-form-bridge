@@ -178,10 +178,10 @@ export default function ContactForm() {
       // ------------------------------------------------
 
       addDebugLog(
-        '📤 Sending POST request to /api/create-contact'
+        '📤 Sending POST request to /api/contacts'
       );
 
-      const res = await fetch('/api/create-contact', {
+      const res = await fetch('/api/contacts', {
         method: 'POST',
 
         headers: {

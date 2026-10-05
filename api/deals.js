@@ -2,16 +2,18 @@ import { getHubSpotToken, MISSING_TOKEN_ERROR } from '../lib/hubspot.js';
 import { getLeadSourcesMap, recordLeadSource } from '../lib/leadSourceTracker.js';
 import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
+import { authenticateRequest } from '../lib/userAuth.js';
+import { can } from '../lib/permissions.js';
 
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
             console.log('FEB [API] /api/deals (GET) called');
 
-            const provided = req.headers['x-admin-key'];
-            if (!provided || provided !== process.env.ADMIN_KEY) {
+            const auth = authenticateRequest(req);
+            if (!auth.authenticated || !can(auth.user?.role, 'view')) {
                 console.log('❌ [API] Unauthorized admin request');
-                return res.status(401).json({ error: 'Unauthorized' });
+                return res.status(401).json({ error: 'Unauthorized. Please log in.' });
             }
 
             const token = getHubSpotToken();
@@ -82,6 +84,14 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
         try {
             console.log('FEB [API] /api/deals (POST) called');
+
+            const auth = authenticateRequest(req);
+            if (!auth.authenticated) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+            if (!can(auth.user?.role, 'create')) {
+                return res.status(403).json({ error: 'Permission denied. Your role cannot create deals.' });
+            }
 
             const { dealname, pipeline, dealstage, amount, contactId, companyId } = req.body || {};
 
@@ -250,9 +260,12 @@ export default async function handler(req, res) {
         try {
             console.log('FEB [API] /api/deals (PUT) called');
 
-            const provided = req.headers['x-admin-key'];
-            if (!provided || provided !== process.env.ADMIN_KEY) {
+            const auth = authenticateRequest(req);
+            if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
+            }
+            if (!can(auth.user?.role, 'edit')) {
+                return res.status(403).json({ error: 'Permission denied. Your role cannot edit deals.' });
             }
 
             const { id, dealname, pipeline, dealstage, amount } = req.body || {};
@@ -429,9 +442,12 @@ export default async function handler(req, res) {
         try {
             console.log('FEB [API] /api/deals (DELETE) called');
 
-            const provided = req.headers['x-admin-key'];
-            if (!provided || provided !== process.env.ADMIN_KEY) {
+            const auth = authenticateRequest(req);
+            if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
+            }
+            if (!can(auth.user?.role, 'delete')) {
+                return res.status(403).json({ error: 'Permission denied. Your role cannot delete deals.' });
             }
 
             const dealId = req.query?.id || req.body?.id;

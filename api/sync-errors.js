@@ -1,15 +1,17 @@
 import { getErrorLogs, clearErrorLogs, getErrorLogById, removeErrorLog, updateErrorLog } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
 import { executeRetryForLog } from '../lib/retryEngine.js';
+import { authenticateRequest } from '../lib/userAuth.js';
+import { can } from '../lib/permissions.js';
 
 export default async function handler(req, res) {
     try {
         console.log(`🐞 [API] /api/sync-errors called (${req.method})`);
 
-        const provided = req.headers['x-admin-key'];
-        if (!provided || provided !== process.env.ADMIN_KEY) {
-            console.log('❌ [API] Unauthorized admin request to sync-errors');
-            return res.status(401).json({ error: 'Unauthorized' });
+        const auth = authenticateRequest(req);
+        if (!auth.authenticated || !can(auth.user?.role, 'view')) {
+            console.log('❌ [API] Unauthorized request to sync-errors');
+            return res.status(401).json({ error: 'Unauthorized. Please log in.' });
         }
 
         if (req.method === 'GET') {
@@ -19,11 +21,17 @@ export default async function handler(req, res) {
         }
 
         if (req.method === 'DELETE') {
+            if (!can(auth.user?.role, 'delete')) {
+                return res.status(403).json({ error: 'Permission denied.' });
+            }
             await clearErrorLogs();
             return res.status(200).json({ success: true, message: 'Sync error logs cleared' });
         }
 
         if (req.method === 'POST') {
+            if (!can(auth.user?.role, 'create') && !can(auth.user?.role, 'edit')) {
+                return res.status(403).json({ error: 'Permission denied.' });
+            }
             const id = req.query?.id || req.body?.id || req.params?.id;
             if (!id) {
                 return res.status(400).json({ error: 'Log ID is required for retry.' });

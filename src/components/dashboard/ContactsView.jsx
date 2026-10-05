@@ -23,6 +23,7 @@ import {
   Plus,
   Building2
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 export function getSourceBadge(source) {
   const src = (source || '').toLowerCase().trim();
@@ -62,6 +63,11 @@ export default function ContactsView({
   onRefreshContacts,
   adminKey
 }) {
+  const { getAuthHeaders, can } = useAuth();
+  const canCreate = can('create');
+  const canEdit = can('edit');
+  const canDelete = can('delete');
+
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('ALL');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState('ALL');
   const [sortBy, setSortBy] = useState('newest'); // 'newest' | 'oldest' | 'name'
@@ -107,10 +113,7 @@ export default function ContactsView({
     try {
       const res = await fetch('/api/contacts', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           name: newContactData.name.trim(),
           email: newContactData.email.trim(),
@@ -175,10 +178,7 @@ export default function ContactsView({
     try {
       const res = await fetch('/api/contacts', {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           id: editingContact.id,
           name: editForm.name.trim(),
@@ -217,9 +217,7 @@ export default function ContactsView({
     try {
       const res = await fetch(`/api/contacts?id=${deletingContact.id}`, {
         method: 'DELETE',
-        headers: {
-          'x-admin-key': adminKey || sessionStorage.getItem('admin_key') || ''
-        }
+        headers: getAuthHeaders()
       });
 
       const data = await res.json().catch(() => ({}));
@@ -357,28 +355,30 @@ export default function ContactsView({
 
         {/* Right: Filters & Export */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Subject Category Filter */}
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-2xl px-3.5 py-2.5 text-xs">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <select
-              value={selectedSubjectFilter}
-              onChange={(e) => {
-                setSelectedSubjectFilter(e.target.value);
-                setCurrentPage(1);
-              }}
-              className="bg-transparent text-slate-800 font-extrabold focus:outline-none cursor-pointer"
-            >
-              <option value="ALL">All Categories ({contacts.length})</option>
-              {Object.entries(subjectCounts.counts).map(([subj, count]) => (
-                <option key={subj} value={subj}>
-                  {subj} ({count})
-                </option>
-              ))}
-              {subjectCounts.noSubjectCount > 0 && (
-                <option value="NONE">General / Uncategorized ({subjectCounts.noSubjectCount})</option>
-              )}
-            </select>
-          </div>
+          {/* Topic Filter (if custom form inquiry subjects exist) */}
+          {Object.keys(subjectCounts.counts).length > 0 && (
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-2xl px-3.5 py-2.5 text-xs">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={selectedSubjectFilter}
+                onChange={(e) => {
+                  setSelectedSubjectFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="bg-transparent text-slate-800 font-extrabold focus:outline-none cursor-pointer"
+              >
+                <option value="ALL">All Inquiry Topics</option>
+                {Object.entries(subjectCounts.counts).map(([subj, count]) => (
+                  <option key={subj} value={subj}>
+                    {subj} ({count})
+                  </option>
+                ))}
+                {subjectCounts.noSubjectCount > 0 && (
+                  <option value="NONE">General / Standard ({subjectCounts.noSubjectCount})</option>
+                )}
+              </select>
+            </div>
+          )}
 
           {/* Source Filter */}
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-2xl px-3.5 py-2.5 text-xs">
@@ -434,17 +434,19 @@ export default function ContactsView({
           </button>
 
           {/* Create HubSpot Contact Button */}
-          <button
-            onClick={() => {
-              setCreateErrorMsg('');
-              setCreateSuccessMsg('');
-              setShowCreateContactModal(true);
-            }}
-            className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center gap-2 shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Create HubSpot Contact</span>
-          </button>
+          {canCreate && (
+            <button
+              onClick={() => {
+                setCreateErrorMsg('');
+                setCreateSuccessMsg('');
+                setShowCreateContactModal(true);
+              }}
+              className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center gap-2 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create HubSpot Contact</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -494,7 +496,6 @@ export default function ContactsView({
                     <th className="px-4 py-4 font-extrabold">Contact Name</th>
                     <th className="px-4 py-4 font-extrabold">Email Address</th>
                     <th className="px-4 py-4 font-extrabold">Phone Number</th>
-                    <th className="px-4 py-4 font-extrabold">Subject / Category</th>
                     <th className="px-4 py-4 font-extrabold">Source</th>
                     <th className="px-4 py-4 font-extrabold">Submitted Date</th>
                     <th className="px-4 py-4 font-extrabold text-right">Actions</th>
@@ -555,16 +556,6 @@ export default function ContactsView({
                           {c.phone || '—'}
                         </td>
 
-                        <td className="px-4 py-3.5">
-                          {c.subject ? (
-                            <span className="inline-flex items-center px-2.5 py-1 rounded-xl text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
-                              {c.subject}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {getSourceBadge(c.lead_source)}
                         </td>
@@ -585,30 +576,36 @@ export default function ContactsView({
                                 <span>Details</span>
                               </button>
 
-                              <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                              {canEdit && (
+                                <>
+                                  <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                                  <button
+                                    onClick={() => handleStartEdit(c)}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
+                                    title="Edit Contact"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
+                                    <span className="hidden xl:inline">Edit</span>
+                                  </button>
+                                </>
+                              )}
 
-                              <button
-                                onClick={() => handleStartEdit(c)}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
-                                title="Edit Contact"
-                              >
-                                <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
-                                <span className="hidden xl:inline">Edit</span>
-                              </button>
-
-                              <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
-
-                              <button
-                                onClick={() => {
-                                  setDeletingContact(c);
-                                  setActionError('');
-                                  setActionSuccess('');
-                                }}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
-                                title="Delete Contact"
-                              >
-                                <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-rose-600 transition-colors" />
-                              </button>
+                              {canDelete && (
+                                <>
+                                  <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                                  <button
+                                    onClick={() => {
+                                      setDeletingContact(c);
+                                      setActionError('');
+                                      setActionSuccess('');
+                                    }}
+                                    className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn"
+                                    title="Delete Contact"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-rose-600 transition-colors" />
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </div>
                         </td>

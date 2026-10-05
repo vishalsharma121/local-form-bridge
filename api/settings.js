@@ -1,21 +1,29 @@
 import { getAllSettings, setAppSetting } from '../lib/appSettings.js';
+import { authenticateRequest } from '../lib/userAuth.js';
+import { can } from '../lib/permissions.js';
 
 export default async function handler(req, res) {
     try {
         console.log(`⚙️ [API] /api/settings called (${req.method})`);
 
-        const provided = req.headers['x-admin-key'];
-        if (!provided || provided !== process.env.ADMIN_KEY) {
+        const auth = authenticateRequest(req);
+        if (!auth.authenticated) {
             console.log('❌ [API] Unauthorized admin request to settings');
             return res.status(401).json({ error: 'Unauthorized' });
         }
 
         if (req.method === 'GET') {
+            if (!can(auth.user?.role, 'view')) {
+                return res.status(403).json({ error: 'Permission denied.' });
+            }
             const settings = await getAllSettings();
             return res.status(200).json({ settings });
         }
 
         if (req.method === 'POST' || req.method === 'PUT') {
+            if (!can(auth.user?.role, 'settings')) {
+                return res.status(403).json({ error: 'Permission denied. Only Super Admin can change settings.' });
+            }
             const { key, value, settings } = req.body || {};
 
             if (settings && typeof settings === 'object') {

@@ -48,6 +48,8 @@ export default function Header({
         return { title: 'Activity Stream Log', desc: 'Live event stream of lead submissions & CRM updates' };
       case 'preview':
         return { title: 'Form Showcase & Live Tester', desc: 'Test lead submission pipeline & public form preview' };
+      case 'team-members':
+        return { title: 'Team Members & Role Access', desc: 'Manage independent sales team users and role permissions' };
       case 'settings':
         return { title: 'System Settings & Diagnostics', desc: 'API health checks & credentials status' };
       default:
