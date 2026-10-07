@@ -6,12 +6,14 @@ import {
     setUserActive, 
     updateUserDetails, 
     updateUserPassword, 
-    deleteUser 
+    deleteUser,
+    generateToken
 } from '../lib/userAuth.js';
+import { syncHubSpotNotesForUser } from '../lib/hubspotOwners.js';
 import { can } from '../lib/permissions.js';
 
 export default async function handler(req, res) {
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequest(req);
     if (!auth.authenticated) {
         return res.status(401).json({ error: 'Unauthorized. Please log in.' });
     }
@@ -25,6 +27,18 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
         try {
+            if (req.query?.action === 'sync-notes') {
+                const users = await listUsers();
+                let totalUpdated = 0;
+                for (const u of users) {
+                    if (u.email && u.name) {
+                        const count = await syncHubSpotNotesForUser(u.email, u.name);
+                        totalUpdated += (count || 0);
+                    }
+                }
+                return res.status(200).json({ success: true, message: `Synced ${totalUpdated} note(s) in HubSpot CRM.` });
+            }
+
             const users = await listUsers();
             return res.status(200).json({ users });
         } catch (err) {
@@ -104,12 +118,32 @@ export default async function handler(req, res) {
                 updated = await setUserActive(userId, is_active);
             }
 
-            if (!updated) {
-                return res.status(400).json({ error: 'Failed to update user.' });
+            const isEditingSelf = Number(userId) === Number(user.userId) || (user.email && email && user.email.toLowerCase().trim() === email.toLowerCase().trim());
+            let newToken = null;
+            let updatedUserObj = null;
+
+            if (isEditingSelf && (name || email || role)) {
+                updatedUserObj = {
+                    id: user.userId,
+                    name: name ? name.trim() : user.name,
+                    email: email ? email.toLowerCase().trim() : user.email,
+                    role: role || user.role
+                };
+                try {
+                    newToken = generateToken(updatedUserObj);
+                } catch {
+                    // Token regeneration optional
+                }
             }
 
             const users = await listUsers();
-            return res.status(200).json({ success: true, users });
+            return res.status(200).json({ 
+                success: true, 
+                users, 
+                updatedSelf: isEditingSelf,
+                updatedUser: updatedUserObj,
+                token: newToken 
+            });
         } catch (err) {
             console.error('🔥 [API/Users] Failed to update user:', err);
             return res.status(500).json({ error: err.message || 'Failed to update user.' });

@@ -3,14 +3,15 @@ import { getLeadSourcesMap, recordLeadSource } from '../lib/leadSourceTracker.js
 import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
 import { authenticateRequest } from '../lib/userAuth.js';
-import { can } from '../lib/permissions.js';
+import { can, formatRole } from '../lib/permissions.js';
+import { getHubSpotOwnerIdByEmail, createHubSpotNote } from '../lib/hubspotOwners.js';
 
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
             console.log('🐞 [API] /api/companies (GET) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated || !can(auth.user?.role, 'view')) {
                 console.log('❌ [API] Unauthorized admin request');
                 return res.status(401).json({ error: 'Unauthorized. Please log in.' });
@@ -42,13 +43,31 @@ export default async function handler(req, res) {
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const companies = (data.results || []).map((c) => ({
-                id: c.id,
-                name: c.properties.name || c.properties.domain || 'Unnamed Company',
-                domain: c.properties.domain || '—',
-                lead_source: c.properties.lead_source || sourcesMap[String(c.id)] || 'HubSpot / Unknown',
-                createdate: c.properties.createdate,
-            })).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
+            const companies = (data.results || []).map((c) => {
+                const srcInfo = sourcesMap[String(c.id)];
+                const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
+                const leadSource = c.properties.lead_source || srcName || 'HubSpot / Unknown';
+
+                let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+                if (!creator) {
+                    if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
+                        creator = 'Public Lead Form';
+                    } else if (leadSource === 'Admin Dashboard' || leadSource.toLowerCase().includes('admin')) {
+                        creator = 'Admin User';
+                    } else {
+                        creator = 'HubSpot CRM';
+                    }
+                }
+
+                return {
+                    id: c.id,
+                    name: c.properties.name || c.properties.domain || 'Unnamed Company',
+                    domain: c.properties.domain || '—',
+                    lead_source: leadSource,
+                    created_by: creator,
+                    createdate: c.properties.createdate,
+                };
+            }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
 
             console.log(`✅ [API] Returning ${companies.length} companies`);
             return res.status(200).json({ companies });
@@ -62,7 +81,7 @@ export default async function handler(req, res) {
         try {
             console.log('🐞 [API] /api/companies (POST) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -97,11 +116,22 @@ export default async function handler(req, res) {
             const targetName = (name || domain).trim();
             const targetDomain = (domain || '').trim();
 
+            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+
+            const userName = auth.user?.name || 'Admin User';
+            const userEmail = auth.user?.email || 'admin@system';
+
             const properties = {
                 name: targetName,
                 domain: targetDomain,
+                description: `Created by ${userName} (${userEmail}) via Admin Dashboard`,
                 lead_source: 'Admin Dashboard',
             };
+
+            if (ownerId) {
+                properties.hubspot_owner_id = ownerId;
+                console.log(`👤 [API] Setting HubSpot Owner ID ${ownerId} for user "${userEmail}"`);
+            }
 
             const findCompanyInHubSpot = async (filterProperty, filterValue) => {
                 if (!filterValue) return null;
@@ -154,11 +184,19 @@ export default async function handler(req, res) {
                         const cloned = res.clone();
                         const errData = await cloned.json();
                         if (errData.message?.includes('PROPERTY_DOESNT_EXIST') || errData.errors?.some(e => e.code === 'PROPERTY_DOESNT_EXIST')) {
-                            console.warn('⚠️ [HubSpot Safety Net] Property "lead_source" does not exist in HubSpot portal. Retrying request without lead_source property...');
+                            console.warn('⚠️ [HubSpot Safety Net] Property safety trigger. Stripping custom property and retrying...');
                             if (opts.body) {
                                 const parsed = JSON.parse(opts.body);
+                                let modified = false;
                                 if (parsed.properties && parsed.properties.lead_source) {
                                     delete parsed.properties.lead_source;
+                                    modified = true;
+                                }
+                                if (parsed.properties && parsed.properties.hubspot_owner_id && errData.message?.includes('hubspot_owner_id')) {
+                                    delete parsed.properties.hubspot_owner_id;
+                                    modified = true;
+                                }
+                                if (modified) {
                                     opts.body = JSON.stringify(parsed);
                                     res = await fetch(url, opts);
                                 }
@@ -193,6 +231,7 @@ export default async function handler(req, res) {
                         type: 'company',
                         operation: 'create',
                         entityInfo: { name: targetName, domain: targetDomain },
+                        user: auth.user,
                         statusCode: companyRes.status,
                         message: companyData.message || 'Failed to create company in HubSpot',
                         details: companyData
@@ -200,14 +239,20 @@ export default async function handler(req, res) {
                     return res.status(companyRes.status).json(companyData);
                 }
                 const companyId = companyData.id;
-                await recordLeadSource(companyId, 'company', 'Admin Dashboard');
+                await recordLeadSource(companyId, 'company', 'Admin Dashboard', userName, auth.user?.userId, auth.user?.email);
+
+                // Attach creator Note in HubSpot
+                const noteContent = `📌 Company Created via Local Form Bridge\n• Created By: ${userName} (${userEmail})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: Admin Dashboard\n• Timestamp: ${new Date().toLocaleString()}`;
+                await createHubSpotNote({ objectType: 'companies', objectId: companyId, noteText: noteContent });
+
                 logSyncActivity({
                     status: 'success',
                     type: 'company',
                     operation: 'create',
                     entityInfo: { name: targetName, domain: targetDomain, id: companyData.id },
+                    user: auth.user,
                     statusCode: companyRes.status,
-                    message: `Company created: ${targetName}`,
+                    message: `Company created by ${userName}: ${targetName}`,
                     details: companyData
                 });
             }
@@ -257,7 +302,7 @@ export default async function handler(req, res) {
         try {
             console.log('🐞 [API] /api/companies (PUT) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -379,6 +424,11 @@ export default async function handler(req, res) {
                 }
             };
 
+            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+            if (ownerId) {
+                properties.hubspot_owner_id = ownerId;
+            }
+
             const response = await safeHubSpotPatch(
                 `https://api.hubapi.com/crm/v3/objects/companies/${companyId}`,
                 token,
@@ -398,13 +448,22 @@ export default async function handler(req, res) {
                 return res.status(response.status).json(data);
             }
 
+            // Post update Note in HubSpot timeline
+            const userName = auth.user?.name || 'Admin User';
+            const userEmail = auth.user?.email || 'admin@system';
+            if (diffParts.length > 0) {
+                const noteContent = `📝 Updated via Admin Dashboard\n• Editor: ${userName} (${userEmail})\n• Changes: ${diffParts.join(', ')}\n• Timestamp: ${new Date().toLocaleString()}`;
+                await createHubSpotNote({ objectType: 'companies', objectId: companyId, noteText: noteContent });
+            }
+
             logSyncActivity({
                 status: 'success',
                 type: 'company',
                 operation: 'update',
                 entityInfo: { companyId, name: newName || oldName, domain: newDomain || oldDomain, changes },
+                user: auth.user,
                 statusCode: response.status,
-                message: diffSummary,
+                message: `[${userName}] ${diffSummary}`,
                 details: { companyId, changes, data }
             });
 
@@ -419,7 +478,7 @@ export default async function handler(req, res) {
         try {
             console.log('🐞 [API] /api/companies (DELETE) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -462,8 +521,9 @@ export default async function handler(req, res) {
                 type: 'company',
                 operation: 'delete',
                 entityInfo: { companyId },
+                user: auth.user,
                 statusCode: 204,
-                message: `Company deleted from HubSpot (ID: ${companyId})`,
+                message: `Company deleted by ${auth.user?.name || 'User'} (ID: ${companyId})`,
                 details: null
             });
 

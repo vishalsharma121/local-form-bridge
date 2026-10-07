@@ -3,14 +3,15 @@ import { getLeadSourcesMap, recordLeadSource } from '../lib/leadSourceTracker.js
 import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
 import { authenticateRequest } from '../lib/userAuth.js';
-import { can } from '../lib/permissions.js';
+import { can, formatRole } from '../lib/permissions.js';
+import { getHubSpotOwnerIdByEmail, createHubSpotNote } from '../lib/hubspotOwners.js';
 
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
             console.log('FEB [API] /api/deals (GET) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated || !can(auth.user?.role, 'view')) {
                 console.log('❌ [API] Unauthorized admin request');
                 return res.status(401).json({ error: 'Unauthorized. Please log in.' });
@@ -42,15 +43,33 @@ export default async function handler(req, res) {
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const deals = (data.results || []).map((d) => ({
-                id: d.id,
-                dealname: d.properties.dealname || 'Unnamed Deal',
-                pipeline: d.properties.pipeline || 'default',
-                dealstage: d.properties.dealstage || 'appointmentscheduled',
-                amount: d.properties.amount || '0',
-                lead_source: d.properties.lead_source || sourcesMap[String(d.id)] || 'HubSpot / Unknown',
-                createdate: d.properties.createdate,
-            })).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
+            const deals = (data.results || []).map((d) => {
+                const srcInfo = sourcesMap[String(d.id)];
+                const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
+                const leadSource = d.properties.lead_source || srcName || 'HubSpot / Unknown';
+
+                let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+                if (!creator) {
+                    if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
+                        creator = 'Public Lead Form';
+                    } else if (leadSource === 'Admin Dashboard' || leadSource.toLowerCase().includes('admin')) {
+                        creator = 'Admin User';
+                    } else {
+                        creator = 'HubSpot CRM';
+                    }
+                }
+
+                return {
+                    id: d.id,
+                    dealname: d.properties.dealname || 'Unnamed Deal',
+                    pipeline: d.properties.pipeline || 'default',
+                    dealstage: d.properties.dealstage || 'appointmentscheduled',
+                    amount: d.properties.amount || '0',
+                    lead_source: leadSource,
+                    created_by: creator,
+                    createdate: d.properties.createdate,
+                };
+            }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
 
             let pipelines = [];
             try {
@@ -85,7 +104,7 @@ export default async function handler(req, res) {
         try {
             console.log('FEB [API] /api/deals (POST) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -132,13 +151,24 @@ export default async function handler(req, res) {
 
             const finalAmount = parseNumericAmount(amount);
 
+            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+
+            const userName = auth.user?.name || 'Admin User';
+            const userEmail = auth.user?.email || 'admin@system';
+
             const properties = {
                 dealname: dealname.trim(),
                 pipeline: finalPipeline,
                 dealstage: finalStage,
                 amount: finalAmount,
+                description: `Created by ${userName} (${userEmail}) via Admin Dashboard`,
                 lead_source: 'Admin Dashboard',
             };
+
+            if (ownerId) {
+                properties.hubspot_owner_id = ownerId;
+                console.log(`👤 [API] Setting HubSpot Owner ID ${ownerId} for deal created by "${userEmail}"`);
+            }
 
             const safeHubSpotFetch = async (url, opts) => {
                 let res = await fetch(url, opts);
@@ -147,11 +177,19 @@ export default async function handler(req, res) {
                         const cloned = res.clone();
                         const errData = await cloned.json();
                         if (errData.message?.includes('PROPERTY_DOESNT_EXIST') || errData.errors?.some(e => e.code === 'PROPERTY_DOESNT_EXIST')) {
-                            console.warn('⚠️ [HubSpot Safety Net] Property "lead_source" does not exist in HubSpot portal. Retrying request without lead_source property...');
+                            console.warn('⚠️ [HubSpot Safety Net] Property safety net triggered. Stripping custom property and retrying...');
                             if (opts.body) {
                                 const parsed = JSON.parse(opts.body);
+                                let modified = false;
                                 if (parsed.properties && parsed.properties.lead_source) {
                                     delete parsed.properties.lead_source;
+                                    modified = true;
+                                }
+                                if (parsed.properties && parsed.properties.hubspot_owner_id && errData.message?.includes('hubspot_owner_id')) {
+                                    delete parsed.properties.hubspot_owner_id;
+                                    modified = true;
+                                }
+                                if (modified) {
                                     opts.body = JSON.stringify(parsed);
                                     res = await fetch(url, opts);
                                 }
@@ -185,6 +223,7 @@ export default async function handler(req, res) {
                     type: 'deal',
                     operation: 'create',
                     entityInfo: { dealName: dealname, amount: finalAmount },
+                    user: auth.user,
                     statusCode: dealRes.status,
                     message: dealData.message || 'Failed to create deal in HubSpot',
                     details: dealData
@@ -194,14 +233,20 @@ export default async function handler(req, res) {
 
             const dealId = dealData.id;
             console.log(`✅ [API] Deal created with ID: ${dealId}`);
-            await recordLeadSource(dealId, 'deal', 'Admin Dashboard');
+            await recordLeadSource(dealId, 'deal', 'Admin Dashboard', userName, auth.user?.userId, auth.user?.email);
+
+            // Attach creator Note in HubSpot
+            const noteContent = `📌 Deal Created via Local Form Bridge\n• Created By: ${userName} (${userEmail})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: Admin Dashboard\n• Timestamp: ${new Date().toLocaleString()}`;
+            await createHubSpotNote({ objectType: 'deals', objectId: dealId, noteText: noteContent });
+
             logSyncActivity({
                 status: 'success',
                 type: 'deal',
                 operation: 'create',
                 entityInfo: { dealName: dealname, amount: finalAmount, id: dealId },
+                user: auth.user,
                 statusCode: dealRes.status,
-                message: `Deal created: ${dealname} ($${finalAmount})`,
+                message: `Deal created by ${userName}: ${dealname} ($${finalAmount})`,
                 details: dealData
             });
 
@@ -260,7 +305,7 @@ export default async function handler(req, res) {
         try {
             console.log('FEB [API] /api/deals (PUT) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -402,6 +447,11 @@ export default async function handler(req, res) {
                 }
             };
 
+            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+            if (ownerId) {
+                properties.hubspot_owner_id = ownerId;
+            }
+
             const response = await safeHubSpotPatch(
                 `https://api.hubapi.com/crm/v3/objects/deals/${dealId}`,
                 token,
@@ -421,13 +471,22 @@ export default async function handler(req, res) {
                 return res.status(response.status).json(data);
             }
 
+            // Post update Note in HubSpot timeline
+            const userName = auth.user?.name || 'Admin User';
+            const userEmail = auth.user?.email || 'admin@system';
+            if (diffParts.length > 0) {
+                const noteContent = `📝 Updated via Admin Dashboard\n• Editor: ${userName} (${userEmail})\n• Changes: ${diffParts.join(', ')}\n• Timestamp: ${new Date().toLocaleString()}`;
+                await createHubSpotNote({ objectType: 'deals', objectId: dealId, noteText: noteContent });
+            }
+
             logSyncActivity({
                 status: 'success',
                 type: 'deal',
                 operation: 'update',
                 entityInfo: { dealId, dealname: newName, amount: newAmount, changes },
+                user: auth.user,
                 statusCode: response.status,
-                message: diffSummary,
+                message: `[${userName}] ${diffSummary}`,
                 details: { dealId, changes, data }
             });
 
@@ -442,7 +501,7 @@ export default async function handler(req, res) {
         try {
             console.log('FEB [API] /api/deals (DELETE) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -485,8 +544,9 @@ export default async function handler(req, res) {
                 type: 'deal',
                 operation: 'delete',
                 entityInfo: { dealId },
+                user: auth.user,
                 statusCode: 204,
-                message: `Deal deleted from HubSpot (ID: ${dealId})`,
+                message: `Deal deleted by ${auth.user?.name || 'User'} (ID: ${dealId})`,
                 details: null
             });
 

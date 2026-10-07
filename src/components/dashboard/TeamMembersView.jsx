@@ -20,16 +20,18 @@ import {
   Building2,
   Copy,
   Check,
-  Crown
+  Crown,
+  RefreshCw
 } from 'lucide-react';
 
 export default function TeamMembersView() {
-  const { getAuthHeaders, user: currentUser, isSuperAdmin } = useAuth();
+  const { getAuthHeaders, user: currentUser, isSuperAdmin, updateUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [copiedEmailId, setCopiedEmailId] = useState(null);
+  const [isSyncingNotes, setIsSyncingNotes] = useState(false);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -94,6 +96,24 @@ export default function TeamMembersView() {
       setError(err.message || 'Failed to load team members.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSyncNotes = async () => {
+    setIsSyncingNotes(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch('/api/users?action=sync-notes', {
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to sync HubSpot creator notes.');
+      setSuccessMsg(data.message || 'Successfully synced creator names across HubSpot CRM notes!');
+    } catch (err) {
+      setError(err.message || 'Failed to sync HubSpot creator notes.');
+    } finally {
+      setIsSyncingNotes(false);
     }
   };
 
@@ -174,6 +194,15 @@ export default function TeamMembersView() {
       }
 
       setSuccessMsg(`Updated user details for ${editFormData.name} successfully.`);
+      
+      const isSelf = data.updatedSelf || String(editUser.id) === String(currentUser?.id || currentUser?.userId) || editUser.email?.toLowerCase().trim() === currentUser?.email?.toLowerCase().trim();
+      if (isSelf) {
+        updateUser(
+          data.updatedUser || { name: editFormData.name, email: editFormData.email, role: editFormData.role },
+          data.token || null
+        );
+      }
+
       setEditUser(null);
       fetchUsers();
     } catch (err) {
@@ -330,18 +359,30 @@ export default function TeamMembersView() {
         </div>
 
         {isSuperAdmin && (
-          <button
-            onClick={() => {
-              setError('');
-              setSuccessMsg('');
-              setAddFormData({ name: '', email: '', password: '', role: 'viewer' });
-              setIsAddModalOpen(true);
-            }}
-            className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-extrabold transition-all shadow-md shadow-orange-600/20 flex items-center gap-2 shrink-0 cursor-pointer self-start md:self-auto"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Team Member</span>
-          </button>
+          <div className="flex items-center gap-2 self-start md:self-auto">
+            <button
+              onClick={handleSyncNotes}
+              disabled={isSyncingNotes}
+              className="px-4 py-2.5 rounded-2xl bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              title="Sync all updated creator names to HubSpot CRM record notes"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingNotes ? 'animate-spin' : ''}`} />
+              <span>{isSyncingNotes ? 'Syncing HubSpot Notes...' : 'Sync Creator Notes to HubSpot'}</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setError('');
+                setSuccessMsg('');
+                setAddFormData({ name: '', email: '', password: '', role: 'viewer' });
+                setIsAddModalOpen(true);
+              }}
+              className="px-5 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-extrabold transition-all shadow-md shadow-orange-600/20 flex items-center gap-2 shrink-0 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Team Member</span>
+            </button>
+          </div>
         )}
       </div>
 

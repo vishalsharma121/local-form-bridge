@@ -6,7 +6,7 @@ export default async function handler(req, res) {
     try {
         console.log(`⚙️ [API] /api/settings called (${req.method})`);
 
-        const auth = authenticateRequest(req);
+        const auth = await authenticateRequest(req);
         if (!auth.authenticated) {
             console.log('❌ [API] Unauthorized admin request to settings');
             return res.status(401).json({ error: 'Unauthorized' });

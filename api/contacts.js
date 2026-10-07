@@ -4,14 +4,32 @@ import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
 import { getAppSetting } from '../lib/appSettings.js';
 import { authenticateRequest } from '../lib/userAuth.js';
-import { can } from '../lib/permissions.js';
+import { can, formatRole } from '../lib/permissions.js';
+import { getHubSpotOwnerIdByEmail, createHubSpotNote } from '../lib/hubspotOwners.js';
+
+function sanitizeAndValidatePhone(rawPhone) {
+    if (rawPhone === undefined || rawPhone === null) return { valid: true, phone: undefined };
+    if (!String(rawPhone).trim()) return { valid: true, phone: '' };
+
+    const trimmed = String(rawPhone).trim();
+    if (/[a-wy-z]/i.test(trimmed)) {
+        return { valid: false, error: 'Invalid phone number. Text and letters are not allowed in phone numbers.' };
+    }
+    const digitsCount = (trimmed.match(/\d/g) || []).length;
+    if (digitsCount < 7 || digitsCount > 15) {
+        return { valid: false, error: 'Please enter a valid phone number containing 7 to 15 digits (e.g. +1 555 000 0000).' };
+    }
+
+    const cleaned = trimmed.replace(/[^0-9+\-\s()xX]/g, '');
+    return { valid: true, phone: cleaned };
+}
 
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
             console.log('🐞 [API] /api/contacts (GET) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated || !can(auth.user?.role, 'view')) {
                 console.log('❌ [API] Unauthorized admin request');
                 return res.status(401).json({ error: 'Unauthorized. Please log in.' });
@@ -46,6 +64,21 @@ export default async function handler(req, res) {
             const contacts = (data.results || []).map((c) => {
                 const fn = c.properties.firstname || '';
                 const ln = (c.properties.lastname === '-' ? '' : c.properties.lastname) || '';
+                const srcInfo = sourcesMap[String(c.id)];
+                const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
+                const leadSource = c.properties.lead_source || srcName || 'HubSpot / Unknown';
+
+                let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+                if (!creator) {
+                    if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
+                        creator = 'Public Lead Form';
+                    } else if (leadSource === 'Admin Dashboard' || leadSource.toLowerCase().includes('admin')) {
+                        creator = 'Admin User';
+                    } else {
+                        creator = 'HubSpot CRM';
+                    }
+                }
+
                 return {
                     id: c.id,
                     firstname: fn,
@@ -55,7 +88,8 @@ export default async function handler(req, res) {
                     phone: c.properties.phone || '',
                     subject: c.properties.subject || '',
                     message: c.properties.message || '',
-                    lead_source: c.properties.lead_source || sourcesMap[String(c.id)] || 'HubSpot / Unknown',
+                    lead_source: leadSource,
+                    created_by: creator,
                     createdate: c.properties.createdate,
                 };
             });
@@ -117,17 +151,31 @@ export default async function handler(req, res) {
                 'Content-Type': 'application/json',
             };
 
+            const auth = await authenticateRequest(req);
+            const userName = auth.user?.name || (req.headers['x-admin-key'] ? 'Admin User' : 'Public Lead Form');
+
             const effectiveLeadSource = req.body?.leadSource || (req.headers['x-admin-key'] ? 'Admin Dashboard' : 'Website Form');
+
+            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+
+            const phoneVal = sanitizeAndValidatePhone(phone);
+            if (!phoneVal.valid) {
+                return res.status(400).json({ error: phoneVal.error });
+            }
 
             const properties = {
                 firstname,
                 lastname: lastname || '',
                 email: cleanEmail,
-                phone: phone || '',
+                phone: phoneVal.phone || '',
                 subject: subject || '',
                 message: message || '',
                 lead_source: effectiveLeadSource,
             };
+
+            if (ownerId) {
+                properties.hubspot_owner_id = ownerId;
+            }
 
             const safeFetch = async (url, opts) => {
                 let res = await fetch(url, opts);
@@ -284,12 +332,23 @@ export default async function handler(req, res) {
 
             const contactId = data.id;
             console.log(`✅ [API] Contact ${action} successful. ID: ${contactId}`);
-            await recordLeadSource(contactId, 'contact', effectiveLeadSource);
+            await recordLeadSource(contactId, 'contact', effectiveLeadSource, userName, auth.user?.userId, auth.user?.email);
+
+            const noteContent = `📌 Contact ${action === 'create' ? 'Created' : 'Updated'} via Local Form Bridge
+• Application: Local Form Bridge
+• Created By: ${userName} (${auth.user?.email || 'N/A'})
+• Role: ${formatRole(auth.user?.role)}
+• Lead Source: ${effectiveLeadSource}
+• Timestamp: ${new Date().toLocaleString()}`;
+
+            await createHubSpotNote({ objectType: 'contacts', objectId: contactId, noteText: noteContent });
+
             logSyncActivity({
                 status: 'success',
                 type: 'contact',
                 operation: action || 'create',
                 entityInfo: { email: cleanEmail, name, id: contactId },
+                user: auth.user,
                 statusCode: response.status,
                 message: `Contact ${action} successful (${cleanEmail})`,
                 details: data
@@ -385,7 +444,13 @@ export default async function handler(req, res) {
                             const compData = await compRes.json();
                             companyId = compData.id;
                             console.log(`✅ [API] Company created: ID ${companyId}`);
-                            await recordLeadSource(companyId, 'company', 'Website Form');
+                            await recordLeadSource(companyId, 'company', effectiveLeadSource || 'Website Form', userName, auth.user?.userId, auth.user?.email);
+
+                            await createHubSpotNote({
+                                objectType: 'companies',
+                                objectId: companyId,
+                                noteText: `📌 Company Created via Local Form Bridge\n• Created By: ${userName} (${auth.user?.email || 'N/A'})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: ${effectiveLeadSource || 'Website Form'}\n• Timestamp: ${new Date().toLocaleString()}`
+                            });
                             logSyncActivity({
                                 status: 'success',
                                 type: 'company',
@@ -593,7 +658,13 @@ export default async function handler(req, res) {
                             const dealData = await dealRes.json();
                             dealId = dealData.id;
                             console.log(`✅ [API] New deal created: ID ${dealId}`);
-                            await recordLeadSource(dealId, 'deal', 'Website Form');
+                            await recordLeadSource(dealId, 'deal', effectiveLeadSource || 'Website Form', userName, auth.user?.userId, auth.user?.email);
+
+                            await createHubSpotNote({
+                                objectType: 'deals',
+                                objectId: dealId,
+                                noteText: `📌 Deal Created via Local Form Bridge\n• Created By: ${userName} (${auth.user?.email || 'N/A'})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: ${effectiveLeadSource || 'Website Form'}\n• Timestamp: ${new Date().toLocaleString()}`
+                            });
                             logSyncActivity({
                                 status: 'success',
                                 type: 'deal',
@@ -724,7 +795,7 @@ export default async function handler(req, res) {
         try {
             console.log(`🐞 [API] /api/contacts (${req.method}) called`);
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -756,7 +827,13 @@ export default async function handler(req, res) {
             if (firstname) properties.firstname = firstname;
             if (name !== undefined) properties.lastname = lastname || '';
             if (email) properties.email = email.trim();
-            if (phone !== undefined) properties.phone = phone;
+            if (phone !== undefined) {
+                const phoneVal = sanitizeAndValidatePhone(phone);
+                if (!phoneVal.valid) {
+                    return res.status(400).json({ error: phoneVal.error });
+                }
+                properties.phone = phoneVal.phone || '';
+            }
             if (subject !== undefined) properties.subject = subject;
             if (message !== undefined) properties.message = message;
 
@@ -812,6 +889,11 @@ export default async function handler(req, res) {
             if (newMsgPayload !== oldMsgPayload) {
                 changes.message = { old: oldMsgPayload || '—', new: newMsgPayload || '—' };
                 diffParts.push(`Message ("${oldMsgPayload || '—'}" → "${newMsgPayload || '—'}")`);
+            }
+
+            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+            if (ownerId) {
+                properties.hubspot_owner_id = ownerId;
             }
 
             const diffSummary = diffParts.length > 0
@@ -909,13 +991,21 @@ export default async function handler(req, res) {
                 return res.status(response.status).json(data);
             }
 
+            const userName = auth.user?.name || 'Admin User';
+            const userEmail = auth.user?.email || 'admin@system';
+            const userRole = auth.user?.role || 'Admin';
+
+            const noteContent = `📝 Contact Updated via Local Form Bridge\n• Editor: ${userName} (${userEmail})\n• Role: ${formatRole(userRole)}\n• Changes: ${diffParts.length > 0 ? diffParts.join(', ') : 'Updated contact details'}\n• Timestamp: ${new Date().toLocaleString()}`;
+            await createHubSpotNote({ objectType: 'contacts', objectId: contactId, noteText: noteContent });
+
             await logSyncActivity({
                 status: 'success',
                 type: 'contact',
                 operation: 'update',
                 entityInfo: { contactId, email: newEmail, name: newFullName, changes },
+                user: auth.user,
                 statusCode: response.status,
-                message: diffSummary,
+                message: `[${auth.user?.name || 'User'}] ${diffSummary}`,
                 details: { contactId, changes, data }
             });
 
@@ -948,7 +1038,7 @@ export default async function handler(req, res) {
         try {
             console.log('🐞 [API] /api/contacts (DELETE) called');
 
-            const auth = authenticateRequest(req);
+            const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
@@ -1000,8 +1090,9 @@ export default async function handler(req, res) {
                 type: 'contact',
                 operation: 'delete',
                 entityInfo: { contactId },
+                user: auth.user,
                 statusCode: 204,
-                message: `Contact deleted from HubSpot (ID: ${contactId})`,
+                message: `Contact deleted by ${auth.user?.name || 'User'} (ID: ${contactId})`,
                 details: null
             });
 

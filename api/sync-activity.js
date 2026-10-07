@@ -6,7 +6,7 @@ export default async function handler(req, res) {
     try {
         console.log(`📡 [API] /api/sync-activity called (${req.method})`);
 
-        const auth = authenticateRequest(req);
+        const auth = await authenticateRequest(req);
         if (!auth.authenticated || !can(auth.user?.role, 'view')) {
             console.log('❌ [API] Unauthorized request to sync-activity');
             return res.status(401).json({ error: 'Unauthorized. Please log in.' });

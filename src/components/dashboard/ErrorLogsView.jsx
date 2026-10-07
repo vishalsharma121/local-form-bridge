@@ -23,8 +23,10 @@ import {
   PlusCircle,
   Edit3,
   Bot,
-  RotateCw
+  RotateCw,
+  UserCheck
 } from 'lucide-react';
+import { getSourceBadge } from './ContactsView';
 
 export function getOperationBadge(operation) {
   const op = (operation || '').toLowerCase().trim();
@@ -609,6 +611,37 @@ export default function ErrorLogsView({
                     </span>
                   </div>
                 </div>
+
+                {/* Creator & Lead Source Attribution Banner */}
+                {(() => {
+                  const creatorName = selectedLog.entityInfo?.createdBy?.name || selectedLog.entityInfo?.createdBy?.email || 'Admin User';
+                  const userRole = selectedLog.entityInfo?.createdBy?.role || 'Admin';
+                  const sourceName = selectedLog.entityInfo?.lead_source || selectedLog.entityInfo?.source || (selectedLog.target ? 'Admin Dashboard' : 'HubSpot / Unknown');
+
+                  return (
+                    <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-50/80 via-slate-50 to-rose-50/30 border border-purple-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-black text-xs shadow-2xs shrink-0">
+                          <UserCheck className="w-4 h-4 text-white" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-purple-700">Triggered By User</span>
+                            <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-800 border border-purple-200 uppercase tracking-wider">
+                              {userRole}
+                            </span>
+                          </div>
+                          <div className="text-xs font-black text-slate-900 mt-0.5">{creatorName}</div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Lead Source:</span>
+                        {getSourceBadge(sourceName)}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Initial Issue Card */}
                 <div className="p-4 rounded-2xl bg-rose-50/80 border border-rose-200/80 space-y-1.5">

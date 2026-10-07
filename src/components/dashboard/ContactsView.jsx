@@ -21,7 +21,11 @@ import {
   AlertTriangle,
   Eye,
   Plus,
-  Building2
+  Building2,
+  UserCheck,
+  Sparkles,
+  Laptop,
+  Cloud
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -29,24 +33,63 @@ export function getSourceBadge(source) {
   const src = (source || '').toLowerCase().trim();
   if (src === 'website form' || src === 'website') {
     return (
-      <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-orange-50 text-[#EE3124] border border-orange-200 inline-flex items-center gap-1.5 whitespace-nowrap shadow-2xs">
-        <span className="w-1.5 h-1.5 rounded-full bg-[#EE3124]"></span>
+      <span className="px-3 py-1 rounded-full text-[11px] font-extrabold bg-gradient-to-r from-orange-50 to-red-50 text-[#EE3124] border border-orange-200/80 inline-flex items-center gap-1.5 whitespace-nowrap shadow-2xs">
+        <Sparkles className="w-3 h-3 text-[#F7941D]" />
         Website Form
       </span>
     );
   }
   if (src === 'admin dashboard' || src === 'admin') {
     return (
-      <span className="px-2.5 py-1 rounded-full text-[11px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200 inline-flex items-center gap-1.5 whitespace-nowrap shadow-2xs">
-        <span className="w-1.5 h-1.5 rounded-full bg-[#F7941D]"></span>
-        Admin Dashboard
+      <span className="px-3 py-1 rounded-full text-[11px] font-extrabold bg-gradient-to-r from-amber-50 to-orange-50 text-amber-900 border border-amber-200/80 inline-flex items-center gap-1.5 whitespace-nowrap shadow-2xs">
+        <Laptop className="w-3 h-3 text-[#F7941D]" />
+        Admin Portal
       </span>
     );
   }
   return (
-    <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-200 inline-flex items-center gap-1.5 whitespace-nowrap">
-      <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-      HubSpot / Unknown
+    <span className="px-3 py-1 rounded-full text-[11px] font-bold bg-slate-100 text-slate-700 border border-slate-200/80 inline-flex items-center gap-1.5 whitespace-nowrap">
+      <Cloud className="w-3 h-3 text-slate-400" />
+      HubSpot Direct
+    </span>
+  );
+}
+
+export function getCreatorBadge(created_by) {
+  const author = (created_by || '').trim();
+  const lower = author.toLowerCase();
+
+  if (!author || lower.includes('hubspot')) {
+    return (
+      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-slate-100/90 text-slate-700 border border-slate-200/90 shadow-2xs hover:bg-slate-200/60 transition-all">
+        <div className="w-4 h-4 rounded-full bg-orange-500 text-white flex items-center justify-center font-black text-[9px] shadow-2xs shrink-0">
+          H
+        </div>
+        <span className="font-extrabold text-slate-800">HubSpot CRM</span>
+      </span>
+    );
+  }
+
+  if (lower.includes('public') || lower.includes('website')) {
+    return (
+      <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold bg-sky-50 text-sky-800 border border-sky-200/90 shadow-2xs">
+        <div className="w-4 h-4 rounded-full bg-sky-600 text-white flex items-center justify-center font-black text-[9px] shadow-2xs shrink-0">
+          W
+        </div>
+        <span className="font-extrabold text-sky-900">Public Lead Form</span>
+      </span>
+    );
+  }
+
+  const nameParts = author.split(' ').filter(Boolean);
+  const initials = nameParts.map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'U';
+
+  return (
+    <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-extrabold bg-gradient-to-r from-purple-50 via-indigo-50/50 to-purple-50 text-purple-900 border border-purple-200/90 shadow-2xs">
+      <div className="w-4 h-4 rounded-full bg-gradient-to-tr from-[#F7941D] to-[#EE3124] text-white flex items-center justify-center font-black text-[9px] shadow-2xs shrink-0">
+        {initials}
+      </div>
+      <span className="truncate max-w-[130px] font-extrabold">{author}</span>
     </span>
   );
 }
@@ -67,6 +110,11 @@ export default function ContactsView({
   const canCreate = can('create');
   const canEdit = can('edit');
   const canDelete = can('delete');
+
+  const sanitizePhoneInput = (val) => {
+    if (!val) return '';
+    return val.replace(/[^0-9+\-\s()xX]/g, '');
+  };
 
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState('ALL');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState('ALL');
@@ -104,6 +152,14 @@ export default function ContactsView({
     if (!newContactData.name.trim() || !newContactData.email.trim()) {
       setCreateErrorMsg('Contact Name and Email Address are required.');
       return;
+    }
+
+    if (newContactData.phone.trim()) {
+      const digitsCount = (newContactData.phone.match(/\d/g) || []).length;
+      if (digitsCount < 7 || digitsCount > 15) {
+        setCreateErrorMsg('Please enter a valid phone number containing 7 to 15 digits (e.g. +1 555 000 0000).');
+        return;
+      }
     }
 
     setIsSubmittingCreate(true);
@@ -170,6 +226,14 @@ export default function ContactsView({
   const handleSaveEdit = async (e) => {
     e.preventDefault();
     if (!editingContact || !editForm.name.trim() || !editForm.email.trim()) return;
+
+    if (editForm.phone.trim()) {
+      const digitsCount = (editForm.phone.match(/\d/g) || []).length;
+      if (digitsCount < 7 || digitsCount > 15) {
+        setActionError('Please enter a valid phone number containing 7 to 15 digits (e.g. +1 555 000 0000).');
+        return;
+      }
+    }
 
     setIsSubmitting(true);
     setActionError('');
@@ -497,6 +561,7 @@ export default function ContactsView({
                     <th className="px-4 py-4 font-extrabold">Email Address</th>
                     <th className="px-4 py-4 font-extrabold">Phone Number</th>
                     <th className="px-4 py-4 font-extrabold">Source</th>
+                    <th className="px-4 py-4 font-extrabold">Created By</th>
                     <th className="px-4 py-4 font-extrabold">Submitted Date</th>
                     <th className="px-4 py-4 font-extrabold text-right">Actions</th>
                   </tr>
@@ -553,11 +618,15 @@ export default function ContactsView({
                         </td>
 
                         <td className="px-4 py-4 font-medium text-slate-600">
-                          {c.phone || '—'}
+                          {c.phone && !/[a-wy-z]/i.test(c.phone) ? c.phone : '—'}
                         </td>
 
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {getSourceBadge(c.lead_source)}
+                        </td>
+
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {getCreatorBadge(c.created_by)}
                         </td>
 
                         <td className="px-4 py-3.5 text-slate-500 text-xs font-medium">
@@ -699,9 +768,11 @@ export default function ContactsView({
                 <Phone className="w-4 h-4 text-[#F7941D] shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <div className="text-[10px] uppercase font-bold text-slate-400">Phone Number</div>
-                  <div className="font-bold text-slate-900">{selectedContact.phone || '—'}</div>
+                  <div className="font-bold text-slate-900">
+                    {selectedContact.phone && !/[a-wy-z]/i.test(selectedContact.phone) ? selectedContact.phone : '—'}
+                  </div>
                 </div>
-                {selectedContact.phone && (
+                {selectedContact.phone && !/[a-wy-z]/i.test(selectedContact.phone) && (
                   <a
                     href={`tel:${selectedContact.phone}`}
                     className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs"
@@ -719,9 +790,16 @@ export default function ContactsView({
                 </div>
               </div>
 
-              <div className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80">
-                <div className="text-[10px] uppercase font-bold text-slate-400">Lead Source</div>
-                <div>{getSourceBadge(selectedContact.lead_source)}</div>
+              {/* Creator & Lead Source Attribution Card */}
+              <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-50/80 via-slate-50 to-orange-50/40 border border-purple-200/80 flex items-center justify-between">
+                <div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-700 mb-1">Created By</div>
+                  {getCreatorBadge(selectedContact.created_by)}
+                </div>
+                <div>
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 mb-1 text-right">Lead Source</div>
+                  {getSourceBadge(selectedContact.lead_source)}
+                </div>
               </div>
 
               {/* Message Box */}
@@ -815,10 +893,10 @@ export default function ContactsView({
                     Phone Number
                   </label>
                   <input
-                    type="text"
-                    placeholder="Phone"
+                    type="tel"
+                    placeholder="e.g. +1 (555) 000-0000"
                     value={editForm.phone}
-                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    onChange={(e) => setEditForm({ ...editForm, phone: sanitizePhoneInput(e.target.value) })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] focus:bg-white transition-all"
                   />
                 </div>
@@ -1011,7 +1089,7 @@ export default function ContactsView({
                       type="tel"
                       placeholder="e.g. +1 (555) 000-0000"
                       value={newContactData.phone}
-                      onChange={(e) => setNewContactData({ ...newContactData, phone: e.target.value })}
+                      onChange={(e) => setNewContactData({ ...newContactData, phone: sanitizePhoneInput(e.target.value) })}
                       className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] focus:bg-white transition-all"
                     />
                   </div>

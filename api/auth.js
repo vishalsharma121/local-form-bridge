@@ -60,6 +60,30 @@ export default async function handler(req, res) {
                 return res.status(401).json({ error: 'Token is invalid or expired.' });
             }
 
+            // Always fetch latest user state from database to catch role/name updates immediately
+            const dbUser = decoded.email ? await getUserByEmail(decoded.email) : null;
+            if (dbUser) {
+                if (dbUser.is_active === false) {
+                    return res.status(403).json({ error: 'Your account has been deactivated.' });
+                }
+
+                const hasChanged = dbUser.name !== decoded.name || dbUser.role !== decoded.role || dbUser.email !== decoded.email;
+                let freshToken = token;
+                if (hasChanged) {
+                    freshToken = generateToken(dbUser);
+                }
+
+                return res.status(200).json({
+                    user: {
+                        id: dbUser.id,
+                        name: dbUser.name,
+                        email: dbUser.email,
+                        role: dbUser.role,
+                    },
+                    token: freshToken
+                });
+            }
+
             return res.status(200).json({
                 user: {
                     id: decoded.userId,
@@ -67,6 +91,7 @@ export default async function handler(req, res) {
                     email: decoded.email,
                     role: decoded.role,
                 },
+                token
             });
         } catch (err) {
             console.error('🔥 [API/Auth] Token verify error:', err);

@@ -39,8 +39,12 @@ export function AuthProvider({ children }) {
           if (!isMounted) return;
 
           if (data && data.user) {
-            console.log('✅ [AuthContext] Token verified successfully for:', data.user.email);
-            setUser(data.user);
+            setUser(prev => {
+              if (prev && prev.name === data.user.name && prev.role === data.user.role && prev.email === data.user.email) {
+                return prev;
+              }
+              return data.user;
+            });
           } else {
             console.log('❌ [AuthContext] Call branch 1 (res.ok but invalid data) -> logout()');
             logout();
@@ -53,7 +57,6 @@ export function AuthProvider({ children }) {
         }
       } catch (err) {
         console.error('🔥 [AuthContext] Call branch 3 (Fetch exception/network error):', err);
-        // Note: Do not call logout() on network failure to avoid wiping valid offline tokens
       } finally {
         if (isMounted) setLoading(false);
       }
@@ -63,6 +66,29 @@ export function AuthProvider({ children }) {
     return () => {
       isMounted = false;
     };
+  }, [token]);
+
+  // Window focus listener to refresh role/name immediately without resetting token or triggering re-fetch loops
+  useEffect(() => {
+    if (!token) return;
+    const handleFocus = () => {
+      fetch('/api/auth', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data && data.user) {
+            setUser(prev => {
+              if (prev && prev.name === data.user.name && prev.role === data.user.role && prev.email === data.user.email) {
+                return prev;
+              }
+              return data.user;
+            });
+          }
+        })
+        .catch(() => {});
+    };
+
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
   }, [token]);
 
   const login = async (email, password) => {
@@ -104,18 +130,17 @@ export function AuthProvider({ children }) {
     return checkCan(user?.role, action);
   };
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = React.useCallback(() => {
     const headers = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    // Backward compatibility fallback for dev/testing
     const envAdminKey = import.meta.env.VITE_ADMIN_KEY;
     if (envAdminKey) {
       headers['x-admin-key'] = envAdminKey;
     }
     return headers;
-  };
+  }, [token]);
 
   const updateToken = (newToken) => {
     if (newToken) {
@@ -124,6 +149,16 @@ export function AuthProvider({ children }) {
     } else {
       localStorage.removeItem('app_auth_token');
       setToken(null);
+    }
+  };
+
+  const updateUser = (updatedUser, newToken = null) => {
+    if (updatedUser) {
+      setUser(prev => ({ ...prev, ...updatedUser }));
+    }
+    if (newToken) {
+      localStorage.setItem('app_auth_token', newToken);
+      setToken(newToken);
     }
   };
 
@@ -137,6 +172,7 @@ export function AuthProvider({ children }) {
         login,
         logout,
         updateToken,
+        updateUser,
         can,
         getAuthHeaders,
         isSuperAdmin: user?.role === 'super_admin',

@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { getSourceBadge } from './ContactsView';
+import { getSourceBadge, getCreatorBadge } from './ContactsView';
 import { 
   Building2, 
   Search, 
@@ -282,6 +282,7 @@ export default function CompaniesView({
                     <th className="px-4 py-4 font-extrabold">Company Name</th>
                     <th className="px-4 py-4 font-extrabold">Domain Name</th>
                     <th className="px-4 py-4 font-extrabold">Source</th>
+                    <th className="px-4 py-4 font-extrabold">Created By</th>
                     <th className="px-4 py-4 font-extrabold">Created Date</th>
                     <th className="px-4 py-4 font-extrabold text-right">Actions</th>
                   </tr>
@@ -325,6 +326,10 @@ export default function CompaniesView({
 
                       <td className="px-4 py-3.5 whitespace-nowrap">
                         {getSourceBadge(c.lead_source)}
+                      </td>
+
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        {getCreatorBadge(c.created_by)}
                       </td>
 
                       <td className="px-4 py-3.5 text-slate-500 text-xs font-medium">

@@ -10,7 +10,7 @@ const MIN_INTERVAL_MS = 45000; // Minimum 45-second gap between auto-retry runs
 
 export default async function handler(req, res) {
     // 1. Auth Guard (JWT or Admin Key verification)
-    const auth = authenticateRequest(req);
+    const auth = await authenticateRequest(req);
     if (!auth.authenticated || !can(auth.user?.role, 'view')) {
         console.warn('❌ [Auto-Retry] Unauthorized trigger attempt');
         return res.status(401).json({ success: false, error: 'Unauthorized: Please log in.' });

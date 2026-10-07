@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { getSourceBadge } from './ContactsView';
+import { getSourceBadge, getCreatorBadge } from './ContactsView';
 import { 
   Briefcase, 
   Search, 
@@ -480,6 +480,7 @@ export default function DealsView({
                     <th className="px-4 py-4 font-extrabold">Deal Stage</th>
                     <th className="px-4 py-4 font-extrabold">Amount</th>
                     <th className="px-4 py-4 font-extrabold">Source</th>
+                    <th className="px-4 py-4 font-extrabold">Created By</th>
                     <th className="px-4 py-4 font-extrabold">Created Date</th>
                     <th className="px-4 py-4 font-extrabold text-right">Actions</th>
                   </tr>
@@ -512,6 +513,10 @@ export default function DealsView({
 
                         <td className="px-4 py-3.5 whitespace-nowrap">
                           {getSourceBadge(d.lead_source)}
+                        </td>
+
+                        <td className="px-4 py-3.5 whitespace-nowrap">
+                          {getCreatorBadge(d.created_by)}
                         </td>
 
                         <td className="px-4 py-3.5 text-slate-500 text-xs font-medium">
