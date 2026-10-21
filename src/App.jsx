@@ -1,13 +1,13 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import ContactForm from './components/ContactForm';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import AdminPage from './pages/AdminPage';
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<ContactForm />} />
-        <Route path="/admin" element={<AdminPage />} />
+        <Route path="/" element={<AdminPage />} />
+        <Route path="/admin" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>
   );

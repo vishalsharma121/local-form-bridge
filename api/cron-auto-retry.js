@@ -11,9 +11,12 @@ const MIN_INTERVAL_MS = 45000; // Minimum 45-second gap between auto-retry runs
 export default async function handler(req, res) {
     // 1. Auth Guard (JWT or Admin Key verification)
     const auth = await authenticateRequest(req);
-    if (!auth.authenticated || !can(auth.user?.role, 'view')) {
+    if (!auth.authenticated) {
         console.warn('❌ [Auto-Retry] Unauthorized trigger attempt');
         return res.status(401).json({ success: false, error: 'Unauthorized: Please log in.' });
+    }
+    if (!can(auth.user, 'view', 'retry')) {
+        return res.status(403).json({ success: false, error: 'Forbidden: Access to retry operations restricted.' });
     }
 
     // 2. Throttle Check for Overlapping Tabs

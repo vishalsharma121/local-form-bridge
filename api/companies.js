@@ -12,9 +12,13 @@ export default async function handler(req, res) {
             console.log('🐞 [API] /api/companies (GET) called');
 
             const auth = await authenticateRequest(req);
-            if (!auth.authenticated || !can(auth.user?.role, 'view')) {
+            if (!auth.authenticated) {
                 console.log('❌ [API] Unauthorized admin request');
                 return res.status(401).json({ error: 'Unauthorized. Please log in.' });
+            }
+            if (!can(auth.user, 'view', 'companies')) {
+                console.log('⚠️ [API] Access restricted to companies');
+                return res.status(403).json({ error: 'Access restricted to companies.' });
             }
 
             const token = getHubSpotToken();
@@ -24,7 +28,7 @@ export default async function handler(req, res) {
             }
 
             const response = await fetch(
-                'https://api.hubapi.com/crm/v3/objects/companies?limit=100&properties=name,domain,lead_source,createdate',
+                'https://api.hubapi.com/crm/v3/objects/companies?limit=100&properties=name,domain,hubspot_owner_id,industry,type,city,state,zip,numberofemployees,annualrevenue,timezone,description,linkedin_company_page,lead_source,createdate',
                 { headers: { Authorization: `Bearer ${token}` } }
             );
 
@@ -46,9 +50,21 @@ export default async function handler(req, res) {
             const companies = (data.results || []).map((c) => {
                 const srcInfo = sourcesMap[String(c.id)];
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
-                const leadSource = c.properties.lead_source || srcName || 'HubSpot / Unknown';
-
                 let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+
+                const isPortalCreator = creator && !creator.toLowerCase().includes('hubspot') && !creator.toLowerCase().includes('public') && !creator.toLowerCase().includes('website');
+                let leadSource = srcName || c.properties.lead_source || 'HubSpot Direct';
+
+                if (isPortalCreator || srcInfo?.created_by_user_id) {
+                    leadSource = 'Admin Dashboard';
+                } else if (creator === 'Public Lead Form' || (leadSource || '').toLowerCase().includes('website')) {
+                    leadSource = 'Website Form';
+                } else if ((leadSource || '').toLowerCase().includes('webhook')) {
+                    leadSource = 'HubSpot Webhook';
+                } else if (!leadSource || leadSource === 'HubSpot CRM' || leadSource === 'HubSpot / Unknown') {
+                    leadSource = 'HubSpot Direct';
+                }
+
                 if (!creator) {
                     if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
                         creator = 'Public Lead Form';
@@ -63,6 +79,17 @@ export default async function handler(req, res) {
                     id: c.id,
                     name: c.properties.name || c.properties.domain || 'Unnamed Company',
                     domain: c.properties.domain || '—',
+                    hubspot_owner_id: c.properties.hubspot_owner_id || '',
+                    industry: c.properties.industry || '',
+                    type: c.properties.type || '',
+                    city: c.properties.city || '',
+                    state: c.properties.state || '',
+                    zip: c.properties.zip || '',
+                    numberofemployees: c.properties.numberofemployees || '',
+                    annualrevenue: c.properties.annualrevenue || '',
+                    timezone: c.properties.timezone || '',
+                    description: c.properties.description || '',
+                    linkedin_company_page: c.properties.linkedin_company_page || '',
                     lead_source: leadSource,
                     created_by: creator,
                     createdate: c.properties.createdate,
@@ -85,11 +112,27 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'create')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot create companies.' });
+            if (!can(auth.user, 'create', 'companies')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow creating companies.' });
             }
 
-            const { name, domain, contactId } = req.body || {};
+            const {
+                name,
+                domain,
+                hubspot_owner_id,
+                industry,
+                type,
+                city,
+                state,
+                zip,
+                numberofemployees,
+                annualrevenue,
+                timezone,
+                description,
+                linkedin_company_page,
+                contactId,
+                allowUpdateIfExists,
+            } = req.body || {};
 
             if (!name?.trim() && !domain?.trim()) {
                 return res.status(400).json({ error: 'Company name or domain is required.' });
@@ -113,24 +156,67 @@ export default async function handler(req, res) {
                 'Content-Type': 'application/json',
             };
 
-            const targetName = (name || domain).trim();
-            const targetDomain = (domain || '').trim();
-
-            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+            const targetName = (name || domain || '').trim();
+            const targetDomain = (domain || '').trim().toLowerCase().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
 
             const userName = auth.user?.name || 'Admin User';
             const userEmail = auth.user?.email || 'admin@system';
 
             const properties = {
                 name: targetName,
-                domain: targetDomain,
-                description: `Created by ${userName} (${userEmail}) via Admin Dashboard`,
                 lead_source: 'Admin Dashboard',
             };
 
-            if (ownerId) {
-                properties.hubspot_owner_id = ownerId;
-                console.log(`👤 [API] Setting HubSpot Owner ID ${ownerId} for user "${userEmail}"`);
+            if (targetDomain) {
+                properties.domain = targetDomain;
+            }
+
+            const chosenOwnerId = hubspot_owner_id || (await getHubSpotOwnerIdByEmail(auth.user?.email));
+            if (chosenOwnerId) {
+                properties.hubspot_owner_id = String(chosenOwnerId);
+                console.log(`👤 [API] Setting HubSpot Owner ID ${chosenOwnerId}`);
+            }
+
+            if (industry && String(industry).trim()) {
+                properties.industry = String(industry).trim();
+            }
+
+            if (type && String(type).trim()) {
+                properties.type = String(type).trim();
+            }
+
+            if (city && String(city).trim()) {
+                properties.city = String(city).trim();
+            }
+
+            if (state && String(state).trim()) {
+                properties.state = String(state).trim();
+            }
+
+            if (zip && String(zip).trim()) {
+                properties.zip = String(zip).trim();
+            }
+
+            if (numberofemployees !== undefined && String(numberofemployees).trim() !== '') {
+                properties.numberofemployees = String(numberofemployees).trim();
+            }
+
+            if (annualrevenue !== undefined && String(annualrevenue).trim() !== '') {
+                properties.annualrevenue = String(annualrevenue).trim();
+            }
+
+            if (timezone && String(timezone).trim()) {
+                properties.timezone = String(timezone).trim();
+            }
+
+            if (description && String(description).trim()) {
+                properties.description = String(description).trim();
+            } else {
+                properties.description = `Created by ${userName} (${userEmail}) via Admin Dashboard`;
+            }
+
+            if (linkedin_company_page && String(linkedin_company_page).trim()) {
+                properties.linkedin_company_page = String(linkedin_company_page).trim();
             }
 
             const findCompanyInHubSpot = async (filterProperty, filterValue) => {
@@ -149,6 +235,11 @@ export default async function handler(req, res) {
                                     },
                                 ],
                             },
+                        ],
+                        properties: [
+                            'name', 'domain', 'hubspot_owner_id', 'industry', 'type',
+                            'city', 'state', 'zip', 'numberofemployees', 'annualrevenue',
+                            'timezone', 'description', 'linkedin_company_page', 'createdate'
                         ],
                     }),
                 });
@@ -209,7 +300,45 @@ export default async function handler(req, res) {
                 return res;
             };
 
-            if (!companyData) {
+            if (companyData) {
+                if (!allowUpdateIfExists) {
+                    const existingName = companyData.properties?.name || targetName;
+                    const existingDomain = companyData.properties?.domain || targetDomain;
+                    console.warn(`⚠️ [API] Duplicate company creation rejected for domain/name: ${targetDomain || targetName} (ID: ${companyData.id})`);
+                    return res.status(409).json({
+                        error: `A company with domain "${existingDomain || targetName}" already exists in HubSpot CRM (${existingName}, ID #${companyData.id}). Duplicate creation is blocked.`,
+                        code: 'COMPANY_ALREADY_EXISTS',
+                        existingCompany: {
+                            id: companyData.id,
+                            name: existingName,
+                            domain: existingDomain,
+                            industry: companyData.properties?.industry || '',
+                            type: companyData.properties?.type || '',
+                            createdate: companyData.properties?.createdate
+                        }
+                    });
+                } else {
+                    console.log(`🔄 [API] allowUpdateIfExists enabled: Updating existing company ID ${companyData.id}`);
+                    const updateRes = await safeHubSpotFetch(`https://api.hubapi.com/crm/v3/objects/companies/${companyData.id}`, {
+                        method: 'PATCH',
+                        headers,
+                        body: JSON.stringify({ properties }),
+                    });
+                    if (updateRes.ok) {
+                        companyData = await updateRes.json();
+                        logSyncActivity({
+                            status: 'success',
+                            type: 'company',
+                            operation: 'update',
+                            entityInfo: { name: targetName, domain: targetDomain, id: companyData.id },
+                            user: auth.user,
+                            statusCode: 200,
+                            message: `Company updated by ${userName}: ${targetName}`,
+                            details: companyData
+                        });
+                    }
+                }
+            } else {
                 const companyRes = await safeHubSpotFetch('https://api.hubapi.com/crm/v3/objects/companies', {
                     method: 'POST',
                     headers,
@@ -306,11 +435,26 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'edit')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot edit companies.' });
+            if (!can(auth.user, 'edit', 'companies')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow editing companies.' });
             }
 
-            const { id, name, domain } = req.body || {};
+            const {
+                id,
+                name,
+                domain,
+                hubspot_owner_id,
+                industry,
+                type,
+                city,
+                state,
+                zip,
+                numberofemployees,
+                annualrevenue,
+                timezone,
+                description,
+                linkedin_company_page,
+            } = req.body || {};
             const companyId = id || req.query?.id;
 
             if (!companyId) {
@@ -322,14 +466,10 @@ export default async function handler(req, res) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
-            const properties = {};
-            if (name !== undefined) properties.name = name.trim();
-            if (domain !== undefined) properties.domain = domain.trim();
-
             let oldRecord = {};
             try {
                 const getOldRes = await fetch(
-                    `https://api.hubapi.com/crm/v3/objects/companies/${companyId}?properties=name,domain`,
+                    `https://api.hubapi.com/crm/v3/objects/companies/${companyId}?properties=name,domain,hubspot_owner_id,industry,type,city,state,zip,numberofemployees,annualrevenue,timezone,description,linkedin_company_page`,
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
                 if (getOldRes.ok) {
@@ -340,21 +480,127 @@ export default async function handler(req, res) {
                 console.warn('⚠️ [API] Could not fetch old company record:', fetchErr.message);
             }
 
+            const properties = {};
             const diffParts = [];
             const changes = {};
 
-            const oldName = oldRecord.name || '';
-            const newName = name !== undefined ? name.trim() : oldName;
-            if (newName && newName !== oldName) {
-                changes.name = { old: oldName || '—', new: newName };
-                diffParts.push(`Name ("${oldName || '—'}" → "${newName}")`);
+            if (name !== undefined) {
+                const trimmed = name.trim();
+                properties.name = trimmed;
+                const oldName = oldRecord.name || '';
+                if (trimmed && trimmed !== oldName) {
+                    changes.name = { old: oldName || '—', new: trimmed };
+                    diffParts.push(`Name ("${oldName || '—'}" → "${trimmed}")`);
+                }
             }
 
-            const oldDomain = oldRecord.domain || '';
-            const newDomain = domain !== undefined ? domain.trim() : oldDomain;
-            if (newDomain !== oldDomain) {
-                changes.domain = { old: oldDomain || '—', new: newDomain || '—' };
-                diffParts.push(`Domain ("${oldDomain || '—'}" → "${newDomain || '—'}")`);
+            if (domain !== undefined) {
+                const trimmedDomain = domain.trim().toLowerCase().replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+                properties.domain = trimmedDomain;
+                const oldDomain = oldRecord.domain || '';
+                if (trimmedDomain !== oldDomain) {
+                    changes.domain = { old: oldDomain || '—', new: trimmedDomain || '—' };
+                    diffParts.push(`Domain ("${oldDomain || '—'}" → "${trimmedDomain || '—'}")`);
+                }
+            }
+
+            if (hubspot_owner_id !== undefined) {
+                properties.hubspot_owner_id = hubspot_owner_id ? String(hubspot_owner_id) : '';
+                const oldOwner = oldRecord.hubspot_owner_id || '';
+                if (properties.hubspot_owner_id !== oldOwner) {
+                    changes.hubspot_owner_id = { old: oldOwner || '—', new: properties.hubspot_owner_id || '—' };
+                    diffParts.push(`Owner ("${oldOwner || '—'}" → "${properties.hubspot_owner_id || '—'}")`);
+                }
+            }
+
+            if (industry !== undefined) {
+                properties.industry = String(industry).trim();
+                const oldInd = oldRecord.industry || '';
+                if (properties.industry !== oldInd) {
+                    changes.industry = { old: oldInd || '—', new: properties.industry || '—' };
+                    diffParts.push(`Industry ("${oldInd || '—'}" → "${properties.industry || '—'}")`);
+                }
+            }
+
+            if (type !== undefined) {
+                properties.type = String(type).trim();
+                const oldType = oldRecord.type || '';
+                if (properties.type !== oldType) {
+                    changes.type = { old: oldType || '—', new: properties.type || '—' };
+                    diffParts.push(`Type ("${oldType || '—'}" → "${properties.type || '—'}")`);
+                }
+            }
+
+            if (city !== undefined) {
+                properties.city = String(city).trim();
+                const oldVal = oldRecord.city || '';
+                if (properties.city !== oldVal) {
+                    changes.city = { old: oldVal || '—', new: properties.city || '—' };
+                    diffParts.push(`City ("${oldVal || '—'}" → "${properties.city || '—'}")`);
+                }
+            }
+
+            if (state !== undefined) {
+                properties.state = String(state).trim();
+                const oldVal = oldRecord.state || '';
+                if (properties.state !== oldVal) {
+                    changes.state = { old: oldVal || '—', new: properties.state || '—' };
+                    diffParts.push(`State/Region ("${oldVal || '—'}" → "${properties.state || '—'}")`);
+                }
+            }
+
+            if (zip !== undefined) {
+                properties.zip = String(zip).trim();
+                const oldVal = oldRecord.zip || '';
+                if (properties.zip !== oldVal) {
+                    changes.zip = { old: oldVal || '—', new: properties.zip || '—' };
+                    diffParts.push(`Postal Code ("${oldVal || '—'}" → "${properties.zip || '—'}")`);
+                }
+            }
+
+            if (numberofemployees !== undefined) {
+                properties.numberofemployees = String(numberofemployees).trim();
+                const oldVal = oldRecord.numberofemployees || '';
+                if (properties.numberofemployees !== oldVal) {
+                    changes.numberofemployees = { old: oldVal || '—', new: properties.numberofemployees || '—' };
+                    diffParts.push(`Employees ("${oldVal || '—'}" → "${properties.numberofemployees || '—'}")`);
+                }
+            }
+
+            if (annualrevenue !== undefined) {
+                properties.annualrevenue = String(annualrevenue).trim();
+                const oldVal = oldRecord.annualrevenue || '';
+                if (properties.annualrevenue !== oldVal) {
+                    changes.annualrevenue = { old: oldVal || '—', new: properties.annualrevenue || '—' };
+                    diffParts.push(`Annual Revenue ("${oldVal || '—'}" → "${properties.annualrevenue || '—'}")`);
+                }
+            }
+
+            if (timezone !== undefined) {
+                properties.timezone = String(timezone).trim();
+                const oldVal = oldRecord.timezone || '';
+                if (properties.timezone !== oldVal) {
+                    changes.timezone = { old: oldVal || '—', new: properties.timezone || '—' };
+                    diffParts.push(`Time Zone ("${oldVal || '—'}" → "${properties.timezone || '—'}")`);
+                }
+            }
+
+            if (description !== undefined) {
+                properties.description = String(description).trim();
+                const oldVal = oldRecord.description || '';
+                if (properties.description !== oldVal) {
+                    changes.description = { old: oldVal || '—', new: properties.description || '—' };
+                    diffParts.push(`Description updated`);
+                }
+            }
+
+            if (linkedin_company_page !== undefined) {
+                properties.linkedin_company_page = String(linkedin_company_page).trim();
+                const oldVal = oldRecord.linkedin_company_page || '';
+                if (properties.linkedin_company_page !== oldVal) {
+                    changes.linkedin_company_page = { old: oldVal || '—', new: properties.linkedin_company_page || '—' };
+                    diffParts.push(`LinkedIn Page ("${oldVal || '—'}" → "${properties.linkedin_company_page || '—'}")`);
+                }
             }
 
             const diffSummary = diffParts.length > 0
@@ -424,23 +670,22 @@ export default async function handler(req, res) {
                 }
             };
 
-            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
-            if (ownerId) {
-                properties.hubspot_owner_id = ownerId;
-            }
-
             const response = await safeHubSpotPatch(
                 `https://api.hubapi.com/crm/v3/objects/companies/${companyId}`,
                 token,
                 properties
             );
 
+            const finalName = properties.name !== undefined ? properties.name : (oldRecord.name || 'Company');
+            const finalDomain = properties.domain !== undefined ? properties.domain : (oldRecord.domain || '—');
+
             const data = await response.json();
+
             if (!response.ok) {
                 logSyncError({
                     type: 'company',
                     operation: 'update',
-                    entityInfo: { companyId, name: newName || oldName, domain: newDomain || oldDomain, changes },
+                    entityInfo: { companyId, name: finalName, domain: finalDomain, changes },
                     statusCode: response.status,
                     errorMessage: data.message || 'Failed to update company in HubSpot',
                     details: data
@@ -460,7 +705,7 @@ export default async function handler(req, res) {
                 status: 'success',
                 type: 'company',
                 operation: 'update',
-                entityInfo: { companyId, name: newName || oldName, domain: newDomain || oldDomain, changes },
+                entityInfo: { companyId, name: finalName, domain: finalDomain, changes },
                 user: auth.user,
                 statusCode: response.status,
                 message: `[${userName}] ${diffSummary}`,
@@ -482,8 +727,8 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'delete')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot delete companies.' });
+            if (!can(auth.user, 'delete', 'companies')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow deleting companies.' });
             }
 
             const companyId = req.query?.id || req.body?.id;

@@ -2,7 +2,6 @@ import { getHubSpotToken, MISSING_TOKEN_ERROR } from '../lib/hubspot.js';
 import { getLeadSourcesMap, recordLeadSource } from '../lib/leadSourceTracker.js';
 import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
-import { getAppSetting } from '../lib/appSettings.js';
 import { authenticateRequest } from '../lib/userAuth.js';
 import { can, formatRole } from '../lib/permissions.js';
 import { getHubSpotOwnerIdByEmail, createHubSpotNote } from '../lib/hubspotOwners.js';
@@ -30,9 +29,13 @@ export default async function handler(req, res) {
             console.log('🐞 [API] /api/contacts (GET) called');
 
             const auth = await authenticateRequest(req);
-            if (!auth.authenticated || !can(auth.user?.role, 'view')) {
+            if (!auth.authenticated) {
                 console.log('❌ [API] Unauthorized admin request');
                 return res.status(401).json({ error: 'Unauthorized. Please log in.' });
+            }
+            if (!can(auth.user, 'view', 'contacts')) {
+                console.log('⚠️ [API] Access restricted to contacts');
+                return res.status(403).json({ error: 'Access restricted to contacts.' });
             }
 
             const token = getHubSpotToken();
@@ -42,7 +45,7 @@ export default async function handler(req, res) {
             }
 
             const response = await fetch(
-                'https://api.hubapi.com/crm/v3/objects/contacts?limit=100&properties=firstname,lastname,email,phone,subject,message,lead_source,createdate&sorts=-createdate',
+                'https://api.hubapi.com/crm/v3/objects/contacts?limit=100&properties=firstname,lastname,email,phone,jobtitle,hubspot_owner_id,lifecyclestage,hs_lead_status,subject,message,lead_source,createdate&associations=companies,deals&sorts=-createdate',
                 { headers: { Authorization: `Bearer ${token}` } }
             );
 
@@ -66,9 +69,21 @@ export default async function handler(req, res) {
                 const ln = (c.properties.lastname === '-' ? '' : c.properties.lastname) || '';
                 const srcInfo = sourcesMap[String(c.id)];
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
-                const leadSource = c.properties.lead_source || srcName || 'HubSpot / Unknown';
-
                 let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+
+                const isPortalCreator = creator && !creator.toLowerCase().includes('hubspot') && !creator.toLowerCase().includes('public') && !creator.toLowerCase().includes('website');
+                let leadSource = srcName || c.properties.lead_source || 'HubSpot Direct';
+
+                if (isPortalCreator || srcInfo?.created_by_user_id) {
+                    leadSource = 'Admin Dashboard';
+                } else if (creator === 'Public Lead Form' || (leadSource || '').toLowerCase().includes('website')) {
+                    leadSource = 'Website Form';
+                } else if ((leadSource || '').toLowerCase().includes('webhook')) {
+                    leadSource = 'HubSpot Webhook';
+                } else if (!leadSource || leadSource === 'HubSpot CRM' || leadSource === 'HubSpot / Unknown') {
+                    leadSource = 'HubSpot Direct';
+                }
+
                 if (!creator) {
                     if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
                         creator = 'Public Lead Form';
@@ -86,6 +101,12 @@ export default async function handler(req, res) {
                     name: `${fn} ${ln}`.trim() || 'Lead',
                     email: c.properties.email || '',
                     phone: c.properties.phone || '',
+                    jobtitle: c.properties.jobtitle || '',
+                    hubspot_owner_id: c.properties.hubspot_owner_id || '',
+                    lifecyclestage: c.properties.lifecyclestage || 'lead',
+                    hs_lead_status: c.properties.hs_lead_status || '',
+                    associatedCompanyIds: (c.associations?.companies?.results || []).map(r => String(r.id)),
+                    associatedDealIds: (c.associations?.deals?.results || []).map(r => String(r.id)),
                     subject: c.properties.subject || '',
                     message: c.properties.message || '',
                     lead_source: leadSource,
@@ -107,27 +128,42 @@ export default async function handler(req, res) {
 
             const { 
                 name, 
+                firstname: reqFirstname,
+                lastname: reqLastname,
                 email, 
                 phone, 
+                jobtitle,
+                hubspot_owner_id,
+                ownerId: reqOwnerId,
+                lifecyclestage,
+                hs_lead_status,
                 subject, 
                 message,
+                companyId: reqCompanyId,
                 companyName,
                 companyDomain,
+                dealId: reqDealId,
                 dealName,
                 pipeline,
                 dealStage,
                 dealAmount
             } = req.body || {};
 
-            if (!name?.trim() || !email?.trim()) {
-                console.log('❌ [API] Validation failed: name or email missing');
+            let firstname = (reqFirstname || '').trim();
+            let lastname = (reqLastname || '').trim();
+            if (!firstname && name?.trim()) {
+                const [fn, ...rest] = name.trim().split(/\s+/);
+                firstname = fn;
+                lastname = rest.join(' ');
+            }
+
+            if ((!firstname && !name?.trim()) || !email?.trim()) {
+                console.log('❌ [API] Validation failed: firstname/name or email missing');
                 return res.status(400).json({
-                    error: 'Name and email are required.',
+                    error: 'First name and email are required.',
                 });
             }
 
-            const [firstname, ...rest] = name.trim().split(/\s+/);
-            const lastname = rest.join(' ');
             const cleanEmail = email.trim();
 
             const token = getHubSpotToken();
@@ -136,7 +172,7 @@ export default async function handler(req, res) {
                 await logSyncError({
                     type: 'contact',
                     operation: 'auth',
-                    entityInfo: { email: cleanEmail, name },
+                    entityInfo: { email: cleanEmail, name: `${firstname} ${lastname}`.trim() },
                     statusCode: 500,
                     errorMessage: MISSING_TOKEN_ERROR,
                     details: null
@@ -152,11 +188,14 @@ export default async function handler(req, res) {
             };
 
             const auth = await authenticateRequest(req);
+            if (auth.authenticated && !can(auth.user, 'create', 'contacts')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow creating contacts.' });
+            }
             const userName = auth.user?.name || (req.headers['x-admin-key'] ? 'Admin User' : 'Public Lead Form');
 
-            const effectiveLeadSource = req.body?.leadSource || (req.headers['x-admin-key'] ? 'Admin Dashboard' : 'Website Form');
+            const effectiveLeadSource = req.body?.leadSource || (auth.authenticated ? 'Admin Dashboard' : (req.headers['x-admin-key'] ? 'Admin Dashboard' : 'Website Form'));
 
-            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+            const defaultOwnerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
 
             const phoneVal = sanitizeAndValidatePhone(phone);
             if (!phoneVal.valid) {
@@ -168,13 +207,34 @@ export default async function handler(req, res) {
                 lastname: lastname || '',
                 email: cleanEmail,
                 phone: phoneVal.phone || '',
-                subject: subject || '',
-                message: message || '',
                 lead_source: effectiveLeadSource,
             };
 
-            if (ownerId) {
-                properties.hubspot_owner_id = ownerId;
+            if (subject && String(subject).trim()) {
+                properties.subject = String(subject).trim();
+            }
+
+            if (message && String(message).trim()) {
+                properties.message = String(message).trim();
+            }
+
+            if (jobtitle && String(jobtitle).trim()) {
+                properties.jobtitle = String(jobtitle).trim();
+            }
+
+            if (lifecyclestage && String(lifecyclestage).trim()) {
+                properties.lifecyclestage = String(lifecyclestage).trim();
+            }
+
+            if (hs_lead_status && String(hs_lead_status).trim()) {
+                properties.hs_lead_status = String(hs_lead_status).trim();
+            }
+
+            const chosenOwnerId = hubspot_owner_id || reqOwnerId;
+            if (chosenOwnerId) {
+                properties.hubspot_owner_id = String(chosenOwnerId);
+            } else if (defaultOwnerId) {
+                properties.hubspot_owner_id = defaultOwnerId;
             }
 
             const safeFetch = async (url, opts) => {
@@ -238,10 +298,28 @@ export default async function handler(req, res) {
             let data;
 
             if (lookup.status === 200) {
-                action = 'update';
                 const existing = await lookup.json();
                 console.log('🔄 [API] Existing contact found. ID:', existing.id);
 
+                const isManualDashboardCreate = effectiveLeadSource === 'Admin Dashboard' || (auth.authenticated && req.headers['authorization']);
+                const allowUpdate = Boolean(req.body?.allowUpdateIfExists);
+
+                if (isManualDashboardCreate && !allowUpdate) {
+                    const existingName = `${existing.properties?.firstname || ''} ${existing.properties?.lastname || ''}`.trim() || 'Existing Contact';
+                    console.warn(`⚠️ [API] Duplicate contact creation rejected for email: ${cleanEmail} (ID: ${existing.id})`);
+                    return res.status(409).json({
+                        error: `A contact with email "${cleanEmail}" already exists in HubSpot CRM (${existingName}, ID #${existing.id}). Duplicate creation is blocked.`,
+                        code: 'CONTACT_ALREADY_EXISTS',
+                        conflict: true,
+                        existingContact: {
+                            id: existing.id,
+                            name: existingName,
+                            email: cleanEmail
+                        }
+                    });
+                }
+
+                action = 'update';
                 response = await safeFetch(
                     `https://api.hubapi.com/crm/v3/objects/contacts/${existing.id}`,
                     {
@@ -274,6 +352,23 @@ export default async function handler(req, res) {
 
                     if (retryLookup.status === 200) {
                         const existingRetry = await retryLookup.json();
+                        const isManualDashboardCreate = effectiveLeadSource === 'Admin Dashboard' || (auth.authenticated && req.headers['authorization']);
+                        const allowUpdate = Boolean(req.body?.allowUpdateIfExists);
+
+                        if (isManualDashboardCreate && !allowUpdate) {
+                            const existingName = `${existingRetry.properties?.firstname || ''} ${existingRetry.properties?.lastname || ''}`.trim() || 'Existing Contact';
+                            return res.status(409).json({
+                                error: `A contact with email "${cleanEmail}" already exists in HubSpot CRM (${existingName}, ID #${existingRetry.id}). Duplicate creation is blocked.`,
+                                code: 'CONTACT_ALREADY_EXISTS',
+                                conflict: true,
+                                existingContact: {
+                                    id: existingRetry.id,
+                                    name: existingName,
+                                    email: cleanEmail
+                                }
+                            });
+                        }
+
                         action = 'update';
                         console.log('🔄 [API] Race condition resolved. Updating contact ID:', existingRetry.id);
 
@@ -354,18 +449,22 @@ export default async function handler(req, res) {
                 details: data
             });
 
-            const autoCreateSetting = await getAppSetting('auto_create_company_deal', 'false');
-            const autoCreateEnabled = String(autoCreateSetting).toLowerCase() === 'true';
-
-            let companyId = null;
+            let companyId = reqCompanyId ? String(reqCompanyId).trim() : null;
             let companyError = null;
             let finalCompanyName = companyName?.trim();
             let finalCompanyDomain = companyDomain?.trim();
 
-            const hasExplicitCompanyInfo = Boolean(finalCompanyName || finalCompanyDomain);
-            const shouldProcessCompany = hasExplicitCompanyInfo || autoCreateEnabled;
-
-            if (shouldProcessCompany) {
+            if (companyId) {
+                try {
+                    await fetch(
+                        `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}/associations/companies/${companyId}/contact_to_company`,
+                        { method: 'PUT', headers }
+                    );
+                    console.log(`🔗 [API] Associated Contact ${contactId} with selected Company ${companyId}`);
+                } catch (cErr) {
+                    console.warn(`⚠️ [API] Failed associating selected Company:`, cErr.message);
+                }
+            } else if (Boolean(finalCompanyName || finalCompanyDomain)) {
                 if (!finalCompanyName) {
                     const emailParts = cleanEmail.split('@');
                     if (emailParts.length === 2) {
@@ -435,7 +534,7 @@ export default async function handler(req, res) {
                                 properties: {
                                     name: finalCompanyName,
                                     domain: finalCompanyDomain || '',
-                                    lead_source: 'Website Form',
+                                    lead_source: 'Admin Dashboard',
                                 },
                             }),
                         });
@@ -456,8 +555,9 @@ export default async function handler(req, res) {
                                 type: 'company',
                                 operation: 'create',
                                 entityInfo: { name: finalCompanyName, domain: finalCompanyDomain, id: companyId },
+                                user: auth.user,
                                 statusCode: compRes.status,
-                                message: `Company created: ${finalCompanyName}`,
+                                message: `Company created by ${userName}: ${finalCompanyName}`,
                                 details: compData
                             });
                         } else {
@@ -520,15 +620,29 @@ export default async function handler(req, res) {
                 console.log('ℹ️ [API] Skipping Company creation (fields blank & auto_create_company_deal is OFF)');
             }
 
-            let dealId = null;
+            let dealId = reqDealId ? String(reqDealId).trim() : null;
             let dealError = null;
-            let finalDealName = dealName?.trim() || (subject ? `${name.trim()} - ${subject} Deal` : '');
+            let finalDealName = dealName?.trim();
             let finalDealStage = 'appointmentscheduled';
 
-            const hasExplicitDealInfo = Boolean(dealName?.trim());
-            const shouldProcessDeal = hasExplicitDealInfo || autoCreateEnabled;
-
-            if (shouldProcessDeal) {
+            if (dealId) {
+                try {
+                    await fetch(
+                        `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/contacts/${contactId}/deal_to_contact`,
+                        { method: 'PUT', headers }
+                    );
+                    console.log(`🔗 [API] Associated Contact ${contactId} with selected Deal ${dealId}`);
+                    if (companyId) {
+                        await fetch(
+                            `https://api.hubapi.com/crm/v3/objects/deals/${dealId}/associations/companies/${companyId}/deal_to_company`,
+                            { method: 'PUT', headers }
+                        );
+                        console.log(`🔗 [API] Associated selected Deal ${dealId} with Company ${companyId}`);
+                    }
+                } catch (dErr) {
+                    console.warn(`⚠️ [API] Failed associating selected Deal:`, dErr.message);
+                }
+            } else if (Boolean(finalDealName)) {
                 const VALID_DEAL_STAGES = [
                     'appointmentscheduled',
                     'qualifiedtobuy',
@@ -624,7 +738,7 @@ export default async function handler(req, res) {
                                 pipeline: finalPipeline,
                                 dealstage: finalDealStage,
                                 amount: finalAmount,
-                                lead_source: 'Website Form',
+                                lead_source: 'Admin Dashboard',
                             },
                             associations: [
                                 {
@@ -663,15 +777,16 @@ export default async function handler(req, res) {
                             await createHubSpotNote({
                                 objectType: 'deals',
                                 objectId: dealId,
-                                noteText: `📌 Deal Created via Local Form Bridge\n• Created By: ${userName} (${auth.user?.email || 'N/A'})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: ${effectiveLeadSource || 'Website Form'}\n• Timestamp: ${new Date().toLocaleString()}`
+                                noteText: `📌 Deal Created via Local Form Bridge\n• Created By: ${userName} (${auth.user?.email || 'N/A'})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: ${effectiveLeadSource || 'Admin Dashboard'}\n• Timestamp: ${new Date().toLocaleString()}`
                             });
                             logSyncActivity({
                                 status: 'success',
                                 type: 'deal',
                                 operation: 'create',
                                 entityInfo: { dealName: finalDealName, amount: finalAmount, contactId, companyId, id: dealId },
+                                user: auth.user,
                                 statusCode: dealRes.status,
-                                message: `Deal created: ${finalDealName} ($${finalAmount})`,
+                                message: `Deal created by ${userName}: ${finalDealName} ($${finalAmount})`,
                                 details: dealData
                             });
                         } else {
@@ -799,11 +914,25 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'edit')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot edit contacts.' });
+            if (!can(auth.user, 'edit', 'contacts')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow editing contacts.' });
             }
 
-            const { id, name, email, phone, subject, message } = req.body || {};
+            const { 
+                id, 
+                name, 
+                firstname: patchFirstname,
+                lastname: patchLastname,
+                email, 
+                phone, 
+                jobtitle,
+                hubspot_owner_id,
+                ownerId: patchOwnerId,
+                lifecyclestage,
+                hs_lead_status,
+                subject, 
+                message 
+            } = req.body || {};
             const contactId = id || req.query?.id;
 
             if (!contactId) {
@@ -815,17 +944,19 @@ export default async function handler(req, res) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
-            let firstname = '';
-            let lastname = '';
-            if (name) {
+            let firstname = patchFirstname !== undefined ? patchFirstname.trim() : '';
+            let lastname = patchLastname !== undefined ? patchLastname.trim() : '';
+            if (name && patchFirstname === undefined) {
                 const parts = name.trim().split(/\s+/);
                 firstname = parts[0];
                 lastname = parts.slice(1).join(' ');
             }
 
             const properties = {};
-            if (firstname) properties.firstname = firstname;
-            if (name !== undefined) properties.lastname = lastname || '';
+            if (firstname || patchFirstname !== undefined) properties.firstname = firstname;
+            if (lastname || patchLastname !== undefined || (name !== undefined && patchFirstname === undefined)) {
+                properties.lastname = lastname || '';
+            }
             if (email) properties.email = email.trim();
             if (phone !== undefined) {
                 const phoneVal = sanitizeAndValidatePhone(phone);
@@ -834,13 +965,22 @@ export default async function handler(req, res) {
                 }
                 properties.phone = phoneVal.phone || '';
             }
+            if (jobtitle !== undefined) properties.jobtitle = jobtitle.trim();
+            if (lifecyclestage !== undefined) properties.lifecyclestage = lifecyclestage.trim();
+            if (hs_lead_status !== undefined) properties.hs_lead_status = hs_lead_status.trim();
+            
+            const chosenOwner = hubspot_owner_id || patchOwnerId;
+            if (chosenOwner) {
+                properties.hubspot_owner_id = String(chosenOwner);
+            }
+
             if (subject !== undefined) properties.subject = subject;
             if (message !== undefined) properties.message = message;
 
             let oldRecord = {};
             try {
                 const getOldRes = await fetch(
-                    `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}?properties=firstname,lastname,email,phone,subject,message`,
+                    `https://api.hubapi.com/crm/v3/objects/contacts/${contactId}?properties=firstname,lastname,email,phone,jobtitle,hubspot_owner_id,lifecyclestage,hs_lead_status,subject,message`,
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
                 if (getOldRes.ok) {
@@ -857,7 +997,7 @@ export default async function handler(req, res) {
             const oldFn = oldRecord.firstname || '';
             const oldLn = (oldRecord.lastname === '-' ? '' : oldRecord.lastname) || '';
             const oldFullName = `${oldFn} ${oldLn}`.trim();
-            const newFullName = name ? name.trim() : oldFullName;
+            const newFullName = (firstname || lastname) ? `${firstname} ${lastname}`.trim() : (name ? name.trim() : oldFullName);
             if (newFullName && newFullName !== oldFullName) {
                 changes.name = { old: oldFullName || '—', new: newFullName };
                 diffParts.push(`Name ("${oldFullName || '—'}" → "${newFullName}")`);
@@ -877,6 +1017,27 @@ export default async function handler(req, res) {
                 diffParts.push(`Phone ("${oldPhone || '—'}" → "${newPhone || '—'}")`);
             }
 
+            const oldJobTitle = oldRecord.jobtitle || '';
+            const newJobTitle = jobtitle !== undefined ? jobtitle.trim() : oldJobTitle;
+            if (newJobTitle !== oldJobTitle) {
+                changes.jobtitle = { old: oldJobTitle || '—', new: newJobTitle || '—' };
+                diffParts.push(`Job Title ("${oldJobTitle || '—'}" → "${newJobTitle || '—'}")`);
+            }
+
+            const oldLifecycle = oldRecord.lifecyclestage || '';
+            const newLifecycle = lifecyclestage !== undefined ? lifecyclestage.trim() : oldLifecycle;
+            if (newLifecycle !== oldLifecycle) {
+                changes.lifecyclestage = { old: oldLifecycle || '—', new: newLifecycle || '—' };
+                diffParts.push(`Lifecycle Stage ("${oldLifecycle || '—'}" → "${newLifecycle || '—'}")`);
+            }
+
+            const oldStatus = oldRecord.hs_lead_status || '';
+            const newStatus = hs_lead_status !== undefined ? hs_lead_status.trim() : oldStatus;
+            if (newStatus !== oldStatus) {
+                changes.hs_lead_status = { old: oldStatus || '—', new: newStatus || '—' };
+                diffParts.push(`Lead Status ("${oldStatus || '—'}" → "${newStatus || '—'}")`);
+            }
+
             const oldSubject = oldRecord.subject || '';
             const newSubject = subject !== undefined ? subject.trim() : oldSubject;
             if (newSubject !== oldSubject) {
@@ -891,9 +1052,11 @@ export default async function handler(req, res) {
                 diffParts.push(`Message ("${oldMsgPayload || '—'}" → "${newMsgPayload || '—'}")`);
             }
 
-            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
-            if (ownerId) {
-                properties.hubspot_owner_id = ownerId;
+            if (!chosenOwner) {
+                const autoOwnerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+                if (autoOwnerId) {
+                    properties.hubspot_owner_id = autoOwnerId;
+                }
             }
 
             const diffSummary = diffParts.length > 0
@@ -1042,8 +1205,8 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'delete')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot delete contacts.' });
+            if (!can(auth.user, 'delete', 'contacts')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow deleting contacts.' });
             }
 
             const contactId = req.query?.id || req.body?.id;

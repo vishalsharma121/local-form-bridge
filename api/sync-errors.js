@@ -9,9 +9,12 @@ export default async function handler(req, res) {
         console.log(`🐞 [API] /api/sync-errors called (${req.method})`);
 
         const auth = await authenticateRequest(req);
-        if (!auth.authenticated || !can(auth.user?.role, 'view')) {
+        if (!auth.authenticated) {
             console.log('❌ [API] Unauthorized request to sync-errors');
             return res.status(401).json({ error: 'Unauthorized. Please log in.' });
+        }
+        if (!can(auth.user, 'view', 'logs')) {
+            return res.status(403).json({ error: 'Access restricted to error logs.' });
         }
 
         if (req.method === 'GET') {

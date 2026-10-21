@@ -11,10 +11,22 @@
   color-scheme: light;
 }
 
+html,
 body {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
   font-family: 'Roboto', sans-serif;
   background-color: #f4f6fa;
   color: #1e293b;
+}
+
+#root {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
 }
 
 /* Remove default browser focus outline rings */
@@ -78,6 +90,15 @@ textarea:focus {
 
 .animate-modal-pop {
   animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes slideLeft {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.animate-slide-left {
+  animation: slideLeft 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 .glass-panel {

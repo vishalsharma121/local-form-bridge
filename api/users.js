@@ -7,7 +7,8 @@ import {
     updateUserDetails, 
     updateUserPassword, 
     deleteUser,
-    generateToken
+    generateToken,
+    updateUserPermissions
 } from '../lib/userAuth.js';
 import { syncHubSpotNotesForUser } from '../lib/hubspotOwners.js';
 import { can } from '../lib/permissions.js';
@@ -49,7 +50,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
         try {
-            const { name, email, password, role } = req.body || {};
+            const { name, email, password, role, permissions } = req.body || {};
             if (!name?.trim() || !email?.trim() || !password) {
                 return res.status(400).json({ error: 'Name, email, and password are required.' });
             }
@@ -58,11 +59,11 @@ export default async function handler(req, res) {
                 return res.status(400).json({ error: 'Password must be at least 6 characters.' });
             }
 
-            if (!['super_admin', 'admin', 'viewer'].includes(role)) {
+            if (!['super_admin', 'admin', 'user', 'viewer'].includes(role)) {
                 return res.status(400).json({ error: 'Invalid role specified.' });
             }
 
-            const result = await createUser({ name, email, password, role });
+            const result = await createUser({ name, email, password, role, permissions });
             if (!result.success) {
                 return res.status(400).json({ error: result.error });
             }
@@ -76,7 +77,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'PATCH') {
         try {
-            const { userId, name, email, role, is_active, newPassword } = req.body || {};
+            const { userId, name, email, role, is_active, newPassword, permissions } = req.body || {};
             if (!userId) {
                 return res.status(400).json({ error: 'userId is required.' });
             }
@@ -103,7 +104,7 @@ export default async function handler(req, res) {
 
             // 2. Details update (name, email, role)
             if (name || email || role) {
-                if (role && !['super_admin', 'admin', 'viewer'].includes(role)) {
+                if (role && !['super_admin', 'admin', 'user', 'viewer'].includes(role)) {
                     return res.status(400).json({ error: 'Invalid role specified.' });
                 }
                 updated = await updateUserDetails(userId, {
@@ -116,6 +117,11 @@ export default async function handler(req, res) {
             // 3. Status toggle
             if (typeof is_active === 'boolean') {
                 updated = await setUserActive(userId, is_active);
+            }
+
+            // 4. Granular Permissions update
+            if (permissions !== undefined) {
+                updated = await updateUserPermissions(userId, permissions);
             }
 
             const isEditingSelf = Number(userId) === Number(user.userId) || (user.email && email && user.email.toLowerCase().trim() === email.toLowerCase().trim());
@@ -146,7 +152,7 @@ export default async function handler(req, res) {
             });
         } catch (err) {
             console.error('🔥 [API/Users] Failed to update user:', err);
-            return res.status(500).json({ error: err.message || 'Failed to update user.' });
+            return res.status(400).json({ error: err.message || 'Failed to update user.' });
         }
     }
 

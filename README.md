@@ -1,14 +1,16 @@
 # Local Form Bridge
 
-A full-stack lead capture and CRM integration bridge connecting modern React web forms to **HubSpot CRM v3** with an audit log & retry engine powered by **Neon Postgres** and **Vercel Serverless Functions**.
+A full-stack, two-way CRM integration bridge connecting your management portal directly to **HubSpot CRM v3** with real-time bidirectional synchronization, Webhook event ingestion, an audit trail & retry engine powered by **Neon Postgres** and **Vercel Serverless Functions**.
 
 ## Architecture & Features
 
-- **Lead Capture Form**: Upserts Contacts, Companies, and Deals with email deduplication (including 409 race-condition handling) and association linking in HubSpot CRM.
-- **Admin Dashboard**: Overview stats, directory views (Contacts, Companies, Deals), Error Audit Log, Retry Queue, Activity Stream, and Settings. Includes date-range filtering, CSV export, and 10-second auto-refresh.
-- **Neon Postgres Audit Trail**: Log persistence for sync errors (`sync_errors`) and real-time events (`sync_activity`).
+- **Primary Dashboard Application**: Centralized management portal at `/` featuring Directories (Contacts, Companies, Deals & Pipelines), Error Audit Log, Retry Queue, Activity Feed, Team Management (RBAC), and Settings.
+- **Two-Way Synchronization (App ↔ HubSpot CRM)**:
+  - **App ➔ HubSpot**: Create, edit, and delete Contacts, Companies, and Deals with email deduplication, race condition handling, and engagement notes.
+  - **HubSpot ➔ App**: Inbound Webhook receiver (`POST /api/hubspot-webhook`) capturing CRM events (`contact.creation`, `deal.propertyChange`, etc.) and streaming live updates into the audit log and directory views.
+- **Neon Postgres Audit Trail**: Log persistence for sync errors (`sync_errors`), real-time activity (`sync_activity`), role-based users (`app_users`), and lead attribution (`record_lead_sources`).
 - **Retry Engine**: Failed syncs can be retried manually from the dashboard or automatically via `api/cron-auto-retry.js`.
-- **Live Health Monitoring**: Dynamic `GET /api/hubspot-health` endpoint checking HubSpot API connectivity with server-side caching (per serverless instance, best-effort).
+- **Live Health Monitoring**: Dynamic `GET /api/hubspot-health` endpoint checking HubSpot API connectivity with server-side caching.
 
 ## Tech Stack
 
@@ -16,18 +18,21 @@ React 19, React Router v7, Vite 8, Tailwind CSS v4, Vercel Serverless Functions 
 
 ## API Endpoints
 
-The `api/` directory contains **8 serverless functions** (Vercel Hobby plan limit is 12; every `.js` file in `api/` counts as one):
+The `api/` directory contains **11 serverless functions** (Vercel Hobby plan limit is 12; every `.js` file in `api/` counts as one):
 
 | Handler | Methods | Purpose |
 | :--- | :--- | :--- |
-| `api/contacts.js` | GET, POST | List contacts / form submission engine (dedupe, upsert, optional auto Company + Deal) |
-| `api/companies.js` | GET, POST | List companies / create company |
-| `api/deals.js` | GET, POST | List deals / create deal with associations |
+| `api/contacts.js` | GET, POST, PUT, DELETE | List, create, update, and delete contacts (dedupe, upsert, optional auto Company + Deal) |
+| `api/companies.js` | GET, POST, PUT, DELETE | List, create, update, and delete companies with domain search |
+| `api/deals.js` | GET, POST, PUT, DELETE | List, create, update, and delete deals with pipelines & stages |
+| `api/hubspot-webhook.js` | GET, POST | Inbound two-way webhook receiver processing CRM events from HubSpot |
 | `api/sync-errors.js` | GET, POST, DELETE | List error logs / retry an error / clear the queue |
 | `api/cron-auto-retry.js` | GET, POST | Cron endpoint that retries unresolved errors |
-| `api/settings.js` | GET, POST | Read and update app settings |
+| `api/settings.js` | GET, POST | Read and update app settings (auto-creation toggles) |
 | `api/hubspot-health.js` | GET | HubSpot connectivity check |
-| `api/sync-activity.js` | GET | Activity audit stream |
+| `api/sync-activity.js` | GET, DELETE | Activity audit stream |
+| `api/auth.js` | GET, POST | User authentication & token verification |
+| `api/users.js` | GET, POST, PATCH, DELETE | Role-based team member management (Super Admin) |
 
 > **Note**: Keep shared code in `lib/`, never in `api/`. Merge new endpoints into existing handlers to stay under the function limit.
 

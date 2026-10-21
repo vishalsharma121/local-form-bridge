@@ -15,16 +15,18 @@ import {
   Briefcase,
   ChevronLeft,
   ChevronRight,
-  Check,
-  Copy,
-  FileCode2,
-  Sparkles,
   ArrowRight,
   PlusCircle,
   Edit3,
   Bot,
   RotateCw,
-  UserCheck
+  UserCheck,
+  Mail,
+  Phone,
+  Globe,
+  Tag,
+  DollarSign,
+  Layers
 } from 'lucide-react';
 import { getSourceBadge } from './ContactsView';
 
@@ -153,6 +155,131 @@ export function getResolutionDetails(log) {
   return 'Sync operation re-executed cleanly and confirmed resolved with HubSpot CRM.';
 }
 
+function EntityDetailsGrid({ entityInfo, type }) {
+  if (!entityInfo || typeof entityInfo !== 'object') return null;
+
+  const ignoredKeys = new Set([
+    'createdBy',
+    'lead_source',
+    'source',
+    'cleanEmail',
+    '_id',
+    'password',
+    'rawErrorMsg',
+    'originalError',
+    'details',
+    'success',
+    'error',
+    'statusCode'
+  ]);
+
+  const combined = { ...entityInfo };
+  if (!combined.email && combined.cleanEmail) {
+    combined.email = combined.cleanEmail;
+  }
+
+  const entries = Object.entries(combined).filter(([k, v]) => {
+    if (ignoredKeys.has(k)) return false;
+    if (v === null || v === undefined || v === '') return false;
+    return true;
+  });
+
+  if (entries.length === 0) return null;
+
+  const getLabel = (k) => {
+    const map = {
+      email: 'Email Address',
+      name: 'Full Name',
+      firstname: 'First Name',
+      lastname: 'Last Name',
+      phone: 'Phone Number',
+      domain: 'Company Domain',
+      company: 'Company Name',
+      companyName: 'Company Name',
+      dealName: 'Deal Name',
+      dealname: 'Deal Name',
+      amount: 'Deal Value / Amount',
+      dealstage: 'Pipeline Stage',
+      pipeline: 'Sales Pipeline',
+      closeDate: 'Projected Close Date',
+      closedate: 'Projected Close Date',
+      hubspotId: 'HubSpot Record ID',
+      hubspotDealId: 'HubSpot Deal ID',
+      hubspotContactId: 'HubSpot Contact ID',
+      hubspotCompanyId: 'HubSpot Company ID',
+      syncedRecordId: 'HubSpot Synced ID',
+      contactId: 'HubSpot Contact ID',
+      companyId: 'HubSpot Company ID',
+      city: 'City',
+      state: 'State / Province',
+      country: 'Country',
+    };
+    if (map[k]) return map[k];
+    return k
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/[_-]/g, ' ')
+      .replace(/^\w/, (c) => c.toUpperCase())
+      .trim();
+  };
+
+  const formatValue = (k, v) => {
+    if (typeof v === 'boolean') {
+      return v ? 'Yes' : 'No';
+    }
+    if (k.toLowerCase().includes('amount') || k === 'dealValue') {
+      const num = Number(v);
+      if (!isNaN(num)) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+      }
+    }
+    if (typeof v === 'object') {
+      return Object.entries(v)
+        .map(([sk, sv]) => `${sk}: ${sv}`)
+        .join(', ');
+    }
+    return String(v);
+  };
+
+  const getPropertyIcon = (k) => {
+    const lk = k.toLowerCase();
+    if (lk.includes('email')) return <Mail className="w-3.5 h-3.5 text-blue-500" />;
+    if (lk.includes('phone')) return <Phone className="w-3.5 h-3.5 text-emerald-500" />;
+    if (lk.includes('deal') || lk.includes('amount')) return <DollarSign className="w-3.5 h-3.5 text-amber-500" />;
+    if (lk.includes('company') || lk.includes('domain')) return <Building2 className="w-3.5 h-3.5 text-indigo-500" />;
+    if (lk.includes('hubspot') || lk.includes('id')) return <Tag className="w-3.5 h-3.5 text-orange-500" />;
+    if (lk.includes('name') || lk.includes('user')) return <Users className="w-3.5 h-3.5 text-purple-500" />;
+    return <Layers className="w-3.5 h-3.5 text-slate-400" />;
+  };
+
+  return (
+    <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+          <Layers className="w-3.5 h-3.5 text-[#EE3124]" />
+          <span>Target Entity Information</span>
+        </span>
+        <span className="text-[10px] font-bold text-slate-400 capitalize">
+          {type || 'Record'} Details
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+        {entries.map(([k, v]) => (
+          <div key={k} className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs space-y-1">
+            <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+              {getPropertyIcon(k)}
+              <span>{getLabel(k)}</span>
+            </div>
+            <div className="font-bold text-slate-800 break-words text-xs">
+              {formatValue(k, v)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function ErrorLogsView({
   errorLogs = [],
   loading = false,
@@ -165,8 +292,6 @@ export default function ErrorLogsView({
   const [selectedLog, setSelectedLog] = useState(null);
   const [isClearing, setIsClearing] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [activeModalTab, setActiveModalTab] = useState('summary'); // 'summary' | 'json'
-  const [copiedJson, setCopiedJson] = useState(false);
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -256,17 +381,12 @@ export default function ErrorLogsView({
     }
   };
 
-  const handleCopyJson = () => {
-    if (!selectedLog) return;
-    navigator.clipboard.writeText(JSON.stringify(selectedLog, null, 2));
-    setCopiedJson(true);
-    setTimeout(() => setCopiedJson(false), 2000);
-  };
+
 
   return (
-    <div className="space-y-6 animate-fade-in font-sans">
+    <div className="space-y-3.5 animate-fade-in font-sans flex flex-col h-full min-h-0">
       {/* Top Banner / Info Bar */}
-      <div className="bg-gradient-to-r from-rose-500/10 via-orange-500/5 to-transparent bg-white p-6 rounded-3xl border border-rose-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-rose-500/10 via-orange-500/5 to-transparent bg-white p-3.5 sm:px-5 sm:py-3 rounded-2xl border border-rose-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-rose-600/20">
             <ShieldAlert className="w-5 h-5" />
@@ -318,7 +438,7 @@ export default function ErrorLogsView({
       </div>
 
       {/* Controls & Filter Bar */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
+      <div className="bg-white p-3 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shrink-0">
         {/* Search */}
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -327,7 +447,7 @@ export default function ErrorLogsView({
             placeholder="Search error messages, status codes, or entity emails..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all shadow-inner"
+            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200/80 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-rose-500/20 focus:border-rose-500 transition-all shadow-inner"
           />
         </div>
 
@@ -342,7 +462,7 @@ export default function ErrorLogsView({
             <button
               key={tab.id}
               onClick={() => setSelectedType(tab.id)}
-              className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 cursor-pointer ${
                 selectedType === tab.id
                   ? 'bg-gradient-to-r from-[#F7941D] to-[#EE3124] text-white shadow-md shadow-orange-600/20'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -362,7 +482,7 @@ export default function ErrorLogsView({
       </div>
 
       {/* Main Table */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col flex-1 min-h-0">
         {loading && (
           <div className="p-12 text-center text-slate-500 space-y-3">
             <div className="w-8 h-8 border-4 border-rose-600 border-t-transparent rounded-full animate-spin mx-auto" />
@@ -390,9 +510,9 @@ export default function ErrorLogsView({
 
         {!loading && !error && filteredLogs.length > 0 && (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs sm:text-sm">
-                <thead className="bg-slate-50 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
+            <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50 z-10 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
                   <tr>
                     <th className="px-4 py-4 font-extrabold">Timestamp</th>
                     <th className="px-4 py-4 font-extrabold">Category</th>
@@ -468,10 +588,7 @@ export default function ErrorLogsView({
 
                         <td className="px-4 py-4 text-right whitespace-nowrap">
                           <button
-                            onClick={() => {
-                              setSelectedLog(log);
-                              setActiveModalTab('summary');
-                            }}
+                            onClick={() => setSelectedLog(log)}
                             className="px-3.5 py-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-[#EE3124] border border-orange-200 font-bold text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                           >
                             <Info className="w-3.5 h-3.5" />
@@ -487,7 +604,7 @@ export default function ErrorLogsView({
 
             {/* Pagination Footer */}
             {filteredLogs.length > pageSize && (
-              <div className="px-4 py-3.5 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+              <div className="shrink-0 px-4 py-3 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
                 <div>
                   Showing <span className="font-bold text-slate-800">{(currentPage - 1) * pageSize + 1}</span> to{' '}
                   <span className="font-bold text-slate-800">
@@ -557,33 +674,6 @@ export default function ErrorLogsView({
               </button>
             </div>
 
-            {/* Modal Navigation Tabs: Executive Summary vs Raw JSON */}
-            <div className="flex items-center gap-2 p-1 bg-slate-100 rounded-2xl text-xs font-extrabold">
-              <button
-                onClick={() => setActiveModalTab('summary')}
-                className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  activeModalTab === 'summary'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-[#EE3124]" />
-                <span>Executive Summary</span>
-              </button>
-              <button
-                onClick={() => setActiveModalTab('json')}
-                className={`flex-1 py-2 px-3 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                  activeModalTab === 'json'
-                    ? 'bg-white text-slate-900 shadow-xs'
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <FileCode2 className="w-3.5 h-3.5 text-indigo-500" />
-                <span>Raw Developer JSON</span>
-              </button>
-            </div>
-
-            {activeModalTab === 'summary' ? (
               <div className="space-y-4 text-xs">
                 {/* Status Metadata Grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
@@ -614,8 +704,9 @@ export default function ErrorLogsView({
 
                 {/* Creator & Lead Source Attribution Banner */}
                 {(() => {
-                  const creatorName = selectedLog.entityInfo?.createdBy?.name || selectedLog.entityInfo?.createdBy?.email || 'Admin User';
-                  const userRole = selectedLog.entityInfo?.createdBy?.role || 'Admin';
+                  const creatorName = selectedLog.entityInfo?.createdBy?.name || selectedLog.entityInfo?.createdBy?.email || 'Team User';
+                  const rawRole = selectedLog.entityInfo?.createdBy?.role || 'User';
+                  const userRole = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Super Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
                   const sourceName = selectedLog.entityInfo?.lead_source || selectedLog.entityInfo?.source || (selectedLog.target ? 'Admin Dashboard' : 'HubSpot / Unknown');
 
                   return (
@@ -637,7 +728,7 @@ export default function ErrorLogsView({
 
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Lead Source:</span>
-                        {getSourceBadge(sourceName)}
+                        {getSourceBadge(sourceName, creatorName)}
                       </div>
                     </div>
                   );
@@ -651,9 +742,6 @@ export default function ErrorLogsView({
                   </div>
                   <p className="text-slate-800 font-bold text-xs leading-relaxed">
                     {parseHumanReadableError(selectedLog.errorMessage)}
-                  </p>
-                  <p className="text-[11px] font-mono text-slate-500 break-all pt-1 border-t border-rose-200/60 mt-2">
-                    Raw Log: {typeof selectedLog.errorMessage === 'string' ? selectedLog.errorMessage : JSON.stringify(selectedLog.errorMessage)}
                   </p>
                 </div>
 
@@ -675,64 +763,8 @@ export default function ErrorLogsView({
                 )}
 
                 {/* Entity Details Card */}
-                {selectedLog.entityInfo && (
-                  <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2">
-                    <span className="text-xs font-extrabold text-slate-800 block">Target Entity Information</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                      {selectedLog.entityInfo.email && (
-                        <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase block">Email Address</span>
-                          <span className="font-mono font-bold text-slate-800">{selectedLog.entityInfo.email}</span>
-                        </div>
-                      )}
-                      {selectedLog.entityInfo.name && (
-                        <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase block">Entity Name</span>
-                          <span className="font-bold text-slate-800">{selectedLog.entityInfo.name}</span>
-                        </div>
-                      )}
-                      {selectedLog.entityInfo.contactId && (
-                        <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase block">HubSpot Contact ID</span>
-                          <span className="font-mono font-bold text-slate-800">{selectedLog.entityInfo.contactId}</span>
-                        </div>
-                      )}
-                      {selectedLog.entityInfo.companyId && (
-                        <div className="bg-white p-2.5 rounded-xl border border-slate-200">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase block">HubSpot Company ID</span>
-                          <span className="font-mono font-bold text-slate-800">{selectedLog.entityInfo.companyId}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
+                <EntityDetailsGrid entityInfo={selectedLog.entityInfo} type={selectedLog.type} />
               </div>
-            ) : (
-              <div className="space-y-3 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700">Raw JSON Payload</span>
-                  <button
-                    onClick={handleCopyJson}
-                    className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    {copiedJson ? (
-                      <>
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        <span className="text-emerald-600">Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3.5 h-3.5" />
-                        <span>Copy JSON</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-                <pre className="p-4 bg-slate-900 text-slate-100 rounded-2xl font-mono text-[11px] leading-relaxed overflow-x-auto max-h-80 border border-slate-800">
-                  {JSON.stringify(selectedLog, null, 2)}
-                </pre>
-              </div>
-            )}
 
             <div className="pt-2 flex items-center justify-end">
               <button

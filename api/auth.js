@@ -33,6 +33,7 @@ export default async function handler(req, res) {
                     name: user.name,
                     email: user.email,
                     role: user.role,
+                    permissions: user.permissions || null,
                 },
             });
         } catch (err) {
@@ -60,38 +61,33 @@ export default async function handler(req, res) {
                 return res.status(401).json({ error: 'Token is invalid or expired.' });
             }
 
-            // Always fetch latest user state from database to catch role/name updates immediately
+            // Always fetch latest user state from database to catch role/name/permissions updates or deletion immediately
             const dbUser = decoded.email ? await getUserByEmail(decoded.email) : null;
-            if (dbUser) {
-                if (dbUser.is_active === false) {
-                    return res.status(403).json({ error: 'Your account has been deactivated.' });
-                }
+            if (!dbUser) {
+                console.warn(`⛔ [API/Auth] Token verification rejected: User "${decoded.email}" no longer exists in database (deleted).`);
+                return res.status(401).json({ error: 'User account no longer exists. Session terminated.' });
+            }
 
-                const hasChanged = dbUser.name !== decoded.name || dbUser.role !== decoded.role || dbUser.email !== decoded.email;
-                let freshToken = token;
-                if (hasChanged) {
-                    freshToken = generateToken(dbUser);
-                }
+            if (dbUser.is_active === false) {
+                console.warn(`⛔ [API/Auth] Token verification rejected: User "${decoded.email}" is deactivated.`);
+                return res.status(403).json({ error: 'Your account has been deactivated. Contact an administrator.' });
+            }
 
-                return res.status(200).json({
-                    user: {
-                        id: dbUser.id,
-                        name: dbUser.name,
-                        email: dbUser.email,
-                        role: dbUser.role,
-                    },
-                    token: freshToken
-                });
+            const hasChanged = dbUser.name !== decoded.name || dbUser.role !== decoded.role || dbUser.email !== decoded.email || JSON.stringify(dbUser.permissions) !== JSON.stringify(decoded.permissions);
+            let freshToken = token;
+            if (hasChanged) {
+                freshToken = generateToken(dbUser);
             }
 
             return res.status(200).json({
                 user: {
-                    id: decoded.userId,
-                    name: decoded.name,
-                    email: decoded.email,
-                    role: decoded.role,
+                    id: dbUser.id,
+                    name: dbUser.name,
+                    email: dbUser.email,
+                    role: dbUser.role,
+                    permissions: dbUser.permissions || null,
                 },
-                token
+                token: freshToken
             });
         } catch (err) {
             console.error('🔥 [API/Auth] Token verify error:', err);

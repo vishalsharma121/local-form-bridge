@@ -185,9 +185,9 @@ export default function RetryQueueView({
   };
 
   return (
-    <div className="space-y-6 animate-fade-in font-sans">
+    <div className="space-y-3.5 animate-fade-in font-sans flex flex-col h-full min-h-0">
       {/* Top Banner / Header */}
-      <div className="bg-gradient-to-r from-orange-500/10 via-red-500/5 to-transparent bg-white p-6 rounded-3xl border border-orange-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-orange-500/10 via-red-500/5 to-transparent bg-white p-3.5 sm:px-5 sm:py-3 rounded-2xl border border-orange-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3.5">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#F7941D] to-[#EE3124] text-white flex items-center justify-center shrink-0 shadow-md shadow-orange-500/20">
             <RotateCw className="w-6 h-6" />
@@ -261,12 +261,12 @@ export default function RetryQueueView({
       )}
 
       {/* Tabs & Search Navigation Bar */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+      <div className="bg-white p-3 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 shrink-0">
         {/* Tab Buttons */}
-        <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200/80">
+        <div className="flex items-center gap-2 bg-slate-50 p-1 rounded-xl border border-slate-200/80">
           <button
             onClick={() => setActiveTab('pending')}
-            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-2 ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-2 ${
               activeTab === 'pending'
                 ? 'bg-gradient-to-r from-[#F7941D] to-[#EE3124] text-white shadow-md shadow-orange-600/20'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -283,7 +283,7 @@ export default function RetryQueueView({
 
           <button
             onClick={() => setActiveTab('failed')}
-            className={`px-4 py-2 rounded-xl text-xs font-extrabold transition-all flex items-center gap-2 ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all flex items-center gap-2 ${
               activeTab === 'failed'
                 ? 'bg-rose-600 text-white shadow-md shadow-rose-600/20'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -307,13 +307,13 @@ export default function RetryQueueView({
             placeholder={`Search ${activeTab} retries by email, target, or error text...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] focus:bg-white transition-all shadow-inner"
+            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200/80 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] focus:bg-white transition-all shadow-inner"
           />
         </div>
       </div>
 
       {/* Queue Table */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col flex-1 min-h-0">
         {loading && (
           <div className="p-12 text-center text-slate-500 space-y-3">
             <div className="w-8 h-8 border-4 border-[#EE3124] border-t-transparent rounded-full animate-spin mx-auto" />
@@ -339,9 +339,9 @@ export default function RetryQueueView({
 
         {!loading && filteredLogs.length > 0 && (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs sm:text-sm">
-                <thead className="bg-slate-50 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
+            <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50 z-10 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
                   <tr>
                     <th className="px-4 py-4 font-extrabold">Timestamp</th>
                     <th className="px-4 py-4 font-extrabold">Category</th>
@@ -412,7 +412,7 @@ export default function RetryQueueView({
 
             {/* Pagination Footer */}
             {filteredLogs.length > pageSize && (
-              <div className="px-4 py-3.5 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+              <div className="shrink-0 px-4 py-3 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
                 <div>
                   Showing <span className="font-bold text-slate-800">{(currentPage - 1) * pageSize + 1}</span> to{' '}
                   <span className="font-bold text-slate-800">

@@ -11,18 +11,168 @@ import {
   AlertCircle, 
   Users, 
   Building2, 
-  Briefcase,
-  Info,
-  ChevronLeft,
-  ChevronRight,
-  PlusCircle,
-  RotateCw,
-  Bot,
-  ArrowRight,
-  Edit3,
-  UserCheck
+  Briefcase, 
+  Info, 
+  ChevronLeft, 
+  ChevronRight, 
+  PlusCircle, 
+  RotateCw, 
+  Bot, 
+  ArrowRight, 
+  Edit3, 
+  UserCheck,
+  User,
+  Mail,
+  Phone,
+  Globe,
+  Tag,
+  DollarSign,
+  Layers
 } from 'lucide-react';
 import { getSourceBadge, getCreatorBadge } from './ContactsView';
+import { useAuth } from '../../context/AuthContext';
+
+function ActivityPropertiesCard({ activity }) {
+  if (!activity) return null;
+  const { entityInfo, details } = activity;
+  if (!entityInfo && !details) return null;
+
+  const combined = {};
+  if (typeof entityInfo === 'object' && entityInfo !== null) {
+    Object.assign(combined, entityInfo);
+  }
+  if (typeof details === 'object' && details !== null) {
+    for (const [k, v] of Object.entries(details)) {
+      if (combined[k] === undefined && typeof v !== 'object') {
+        combined[k] = v;
+      }
+    }
+  }
+
+  // Filter out internal, redundant, or already-displayed fields
+  const ignoredKeys = new Set([
+    'createdBy',
+    'lead_source',
+    'source',
+    'cleanEmail',
+    '_id',
+    'password',
+    'rawErrorMsg',
+    'originalError',
+    'details',
+    'success',
+    'error',
+    'statusCode'
+  ]);
+
+  if (!combined.email && combined.cleanEmail) {
+    combined.email = combined.cleanEmail;
+  }
+
+  const entries = Object.entries(combined).filter(([k, v]) => {
+    if (ignoredKeys.has(k)) return false;
+    if (v === null || v === undefined || v === '') return false;
+    return true;
+  });
+
+  if (entries.length === 0) return null;
+
+  const getLabel = (k) => {
+    const map = {
+      email: 'Email Address',
+      name: 'Full Name',
+      firstname: 'First Name',
+      lastname: 'Last Name',
+      phone: 'Phone Number',
+      domain: 'Company Domain',
+      company: 'Company Name',
+      companyName: 'Company Name',
+      dealName: 'Deal Name',
+      dealname: 'Deal Name',
+      amount: 'Deal Value / Amount',
+      dealstage: 'Pipeline Stage',
+      pipeline: 'Sales Pipeline',
+      closeDate: 'Projected Close Date',
+      closedate: 'Projected Close Date',
+      hubspotId: 'HubSpot Record ID',
+      hubspotDealId: 'HubSpot Deal ID',
+      hubspotContactId: 'HubSpot Contact ID',
+      hubspotCompanyId: 'HubSpot Company ID',
+      syncedRecordId: 'HubSpot Synced ID',
+      contactId: 'Associated Contact ID',
+      companyId: 'Associated Company ID',
+      city: 'City',
+      state: 'State / Province',
+      country: 'Country',
+      subject: 'Subject Line',
+      message: 'Inquiry Message',
+      notes: 'Internal Notes',
+    };
+    if (map[k]) return map[k];
+    return k
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/[_-]/g, ' ')
+      .replace(/^\w/, (c) => c.toUpperCase())
+      .trim();
+  };
+
+  const formatValue = (k, v) => {
+    if (typeof v === 'boolean') {
+      return v ? 'Yes' : 'No';
+    }
+    if (k.toLowerCase().includes('amount') || k === 'dealValue') {
+      const num = Number(v);
+      if (!isNaN(num)) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+      }
+    }
+    if (typeof v === 'object') {
+      return Object.entries(v)
+        .map(([sk, sv]) => `${sk}: ${sv}`)
+        .join(', ');
+    }
+    return String(v);
+  };
+
+  const getPropertyIcon = (k) => {
+    const lk = k.toLowerCase();
+    if (lk.includes('email')) return <Mail className="w-3.5 h-3.5 text-blue-500" />;
+    if (lk.includes('phone')) return <Phone className="w-3.5 h-3.5 text-emerald-500" />;
+    if (lk.includes('deal') || lk.includes('amount')) return <DollarSign className="w-3.5 h-3.5 text-amber-500" />;
+    if (lk.includes('company') || lk.includes('domain')) return <Building2 className="w-3.5 h-3.5 text-indigo-500" />;
+    if (lk.includes('hubspot') || lk.includes('id')) return <Tag className="w-3.5 h-3.5 text-orange-500" />;
+    if (lk.includes('name') || lk.includes('user')) return <Users className="w-3.5 h-3.5 text-purple-500" />;
+    return <Layers className="w-3.5 h-3.5 text-slate-400" />;
+  };
+
+  return (
+    <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-extrabold text-slate-800 flex items-center gap-1.5 uppercase tracking-wider">
+          <Layers className="w-3.5 h-3.5 text-[#EE3124]" />
+          <span>Associated Record Details</span>
+        </span>
+        <span className="text-[10px] font-bold text-slate-400">
+          {entries.length} {entries.length === 1 ? 'property' : 'properties'}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+        {entries.map(([k, v]) => (
+          <div key={k} className="bg-white p-2.5 rounded-xl border border-slate-200/80 shadow-2xs space-y-1">
+            <div className="flex items-center gap-1.5 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+              {getPropertyIcon(k)}
+              <span>{getLabel(k)}</span>
+            </div>
+            <div className="font-bold text-slate-800 break-words text-xs">
+              {formatValue(k, v)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function parseMessageDiffs(message) {
   if (!message) return [];
@@ -46,24 +196,45 @@ export default function ActivityFeedView({
   onRefreshActivities,
   onClearActivities
 }) {
+  const { user, isSuperAdmin } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'success' | 'failure'
   const [typeFilter, setTypeFilter] = useState('all'); // 'all' | 'contact' | 'company' | 'deal'
+  const [memberFilter, setMemberFilter] = useState('all');
   const [selectedActivity, setSelectedActivity] = useState(null);
   const [isClearing, setIsClearing] = useState(false);
+
+  // List of unique team members found in activities (for Super Admin filter)
+  const teamMembersList = useMemo(() => {
+    if (!isSuperAdmin) return [];
+    const set = new Set();
+    for (const act of activities) {
+      const name = act.userName || act.entityInfo?.createdBy?.name;
+      if (name && !name.toLowerCase().includes('hubspot') && !name.toLowerCase().includes('webhook') && !name.toLowerCase().includes('public')) {
+        set.add(name);
+      }
+    }
+    return Array.from(set).sort();
+  }, [activities, isSuperAdmin]);
 
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 10;
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, statusFilter, typeFilter, activities.length]);
+  }, [searchQuery, statusFilter, typeFilter, memberFilter, activities.length]);
 
   const filteredActivities = useMemo(() => {
     return activities.filter((act) => {
       const q = searchQuery.toLowerCase().trim();
       const matchesStatus = statusFilter === 'all' || act.status === statusFilter;
       const matchesType = typeFilter === 'all' || act.type === typeFilter;
+
+      const authorName = act.userName || act.entityInfo?.createdBy?.name || '';
+      const matchesMember =
+        !isSuperAdmin ||
+        memberFilter === 'all' ||
+        authorName.toLowerCase().trim() === memberFilter.toLowerCase().trim();
 
       const entityStr = JSON.stringify(act.entityInfo || {}).toLowerCase();
       const msgStr = (act.message || '').toLowerCase();
@@ -73,11 +244,12 @@ export default function ActivityFeedView({
         !q ||
         entityStr.includes(q) ||
         msgStr.includes(q) ||
+        authorName.toLowerCase().includes(q) ||
         statusStr.includes(q);
 
-      return matchesStatus && matchesType && matchesSearch;
+      return matchesStatus && matchesType && matchesMember && matchesSearch;
     });
-  }, [activities, searchQuery, statusFilter, typeFilter]);
+  }, [activities, searchQuery, statusFilter, typeFilter, memberFilter, isSuperAdmin]);
 
   const totalPages = Math.ceil(filteredActivities.length / pageSize) || 1;
 
@@ -190,26 +362,34 @@ export default function ActivityFeedView({
   };
 
   return (
-    <div className="space-y-6 animate-fade-in font-sans">
+    <div className="space-y-3.5 animate-fade-in font-sans flex flex-col h-full min-h-0">
       {/* Top Banner Bar */}
-      <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent bg-white p-6 rounded-3xl border border-emerald-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/5 to-transparent bg-white p-3.5 sm:px-5 sm:py-3 rounded-2xl border border-emerald-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shrink-0">
         <div className="flex items-center gap-3.5">
           <div className="w-11 h-11 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-600/20">
             <Activity className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="font-extrabold text-base text-slate-900 flex items-center gap-2">
-              <span>Live CRM Sync Activity Feed</span>
+            <h2 className="font-extrabold text-base text-slate-900 flex flex-wrap items-center gap-2">
+              <span>{isSuperAdmin ? 'Live CRM Sync Activity Feed' : 'My Activity Stream'}</span>
               <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200 font-extrabold">
-                {activities.length} Events
+                {filteredActivities.length} {filteredActivities.length === 1 ? 'Event' : 'Events'}
               </span>
+              {!isSuperAdmin && (
+                <span className="text-xs px-2.5 py-0.5 rounded-full bg-orange-50 text-orange-700 border border-orange-200 font-extrabold inline-flex items-center gap-1 shadow-2xs">
+                  <UserCheck className="w-3.5 h-3.5 text-[#EE3124]" />
+                  <span>My Work Only</span>
+                </span>
+              )}
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200 font-bold flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
-                Auto-Refreshing (10s)
+                Live Sync (10s)
               </span>
             </h2>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Real-time chronological stream of every HubSpot sync event (successes and failures).
+              {isSuperAdmin
+                ? 'Real-time chronological stream of every HubSpot sync event across all team members.'
+                : `Real-time chronological stream of CRM sync operations and record updates performed by you (${user?.name || 'Team Member'}).`}
             </p>
           </div>
         </div>
@@ -218,17 +398,17 @@ export default function ActivityFeedView({
           <button
             onClick={onRefreshActivities}
             disabled={loading}
-            className="px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5"
+            className="px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Refresh Stream</span>
           </button>
 
-          {activities.length > 0 && (
+          {isSuperAdmin && activities.length > 0 && (
             <button
               onClick={handleClear}
               disabled={isClearing}
-              className="px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-rose-600 hover:text-white text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-50"
+              className="px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-rose-600 hover:text-white text-slate-700 text-xs font-bold transition-all flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-2xs"
             >
               <Trash2 className="w-3.5 h-3.5" />
               <span>Clear History</span>
@@ -238,23 +418,40 @@ export default function ActivityFeedView({
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="bg-white p-4 sm:p-5 rounded-3xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+      <div className="bg-white p-3 sm:px-4 sm:py-2.5 rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-2.5 shrink-0">
         {/* Search Input */}
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Search sync messages, emails, or status codes..."
+            placeholder={isSuperAdmin ? "Search sync messages, team members, or status codes..." : "Search your sync messages or status codes..."}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 text-xs sm:text-sm bg-slate-50 border border-slate-200/80 rounded-2xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-inner"
+            className="w-full pl-10 pr-4 py-2 text-xs sm:text-sm bg-slate-50 border border-slate-200/80 rounded-xl text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all shadow-inner"
           />
         </div>
 
         {/* Filter Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          {/* Member Filter (Super Admin Only) */}
+          {isSuperAdmin && teamMembersList.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-1.5 text-xs">
+              <User className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={memberFilter}
+                onChange={(e) => setMemberFilter(e.target.value)}
+                className="bg-transparent text-slate-800 font-extrabold focus:outline-none cursor-pointer text-xs"
+              >
+                <option value="all">All Members ({teamMembersList.length})</option>
+                {teamMembersList.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {/* Status Filter */}
-          <div className="flex items-center bg-slate-50 p-1.5 rounded-2xl border border-slate-200/80">
+          <div className="flex items-center bg-slate-50 p-1 rounded-xl border border-slate-200/80">
             {[
               { id: 'all', label: 'All Status' },
               { id: 'success', label: 'Successes' },
@@ -263,7 +460,7 @@ export default function ActivityFeedView({
               <button
                 key={btn.id}
                 onClick={() => setStatusFilter(btn.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
                   statusFilter === btn.id
                     ? 'bg-gradient-to-r from-[#F7941D] to-[#EE3124] text-white shadow-md shadow-orange-600/20'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -275,7 +472,7 @@ export default function ActivityFeedView({
           </div>
 
           {/* Type Filter */}
-          <div className="flex items-center bg-slate-50 p-1.5 rounded-2xl border border-slate-200/80">
+          <div className="flex items-center bg-slate-50 p-1 rounded-xl border border-slate-200/80">
             {[
               { id: 'all', label: 'All Types' },
               { id: 'contact', label: 'Contacts' },
@@ -285,7 +482,7 @@ export default function ActivityFeedView({
               <button
                 key={btn.id}
                 onClick={() => setTypeFilter(btn.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-extrabold transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-extrabold transition-all ${
                   typeFilter === btn.id
                     ? 'bg-gradient-to-r from-[#F7941D] to-[#EE3124] text-white shadow-md shadow-orange-600/20'
                     : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -299,7 +496,7 @@ export default function ActivityFeedView({
       </div>
 
       {/* Main Table / Stream View */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col flex-1 min-h-0">
         {loading && activities.length === 0 && (
           <div className="p-12 text-center text-slate-500 space-y-3">
             <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto" />
@@ -316,27 +513,32 @@ export default function ActivityFeedView({
         {!loading && !error && filteredActivities.length === 0 && (
           <div className="p-12 text-center text-slate-400 space-y-3">
             <Activity className="w-10 h-10 text-slate-300 mx-auto" />
-            <p className="text-sm font-bold text-slate-700">No Activity Logged Yet</p>
-            <p className="text-xs text-slate-500">
-              {searchQuery || statusFilter !== 'all' || typeFilter !== 'all'
-                ? 'No activities match your current search or filter rules.'
-                : 'Submit a contact form or trigger a CRM operation to generate activity logs.'}
+            <p className="text-sm font-bold text-slate-700">
+              {isSuperAdmin ? 'No Activity Logged Yet' : 'No Activity Recorded for Your Account Yet'}
+            </p>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              {searchQuery || statusFilter !== 'all' || typeFilter !== 'all' || memberFilter !== 'all'
+                ? 'No activities match your current search or filter criteria.'
+                : isSuperAdmin
+                  ? 'Submit a contact form or trigger a CRM operation to generate activity logs.'
+                  : 'When you create, edit, or delete CRM contacts, companies, or deals, your personal activity history will appear here in real time.'}
             </p>
           </div>
         )}
 
         {!loading && !error && filteredActivities.length > 0 && (
           <>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs sm:text-sm">
-                <thead className="bg-slate-50 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
+            <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+              <table className="w-full text-left text-xs">
+                <thead className="sticky top-0 bg-slate-50 z-10 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
                   <tr>
                     <th className="px-4 py-4 font-extrabold">Timestamp</th>
                     <th className="px-4 py-4 font-extrabold">Outcome</th>
                     <th className="px-4 py-4 font-extrabold">Category</th>
                     <th className="px-4 py-4 font-extrabold">Operation</th>
+                    <th className="px-4 py-4 font-extrabold">Performed By</th>
                     <th className="px-4 py-4 font-extrabold">Message & Summary</th>
-                    <th className="px-4 py-4 font-extrabold text-right">Raw Data</th>
+                    <th className="px-4 py-4 font-extrabold text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -364,6 +566,10 @@ export default function ActivityFeedView({
                         {getOperationBadge(act.operation)}
                       </td>
 
+                      <td className="px-4 py-4 whitespace-nowrap">
+                        {getCreatorBadge(act.userName || act.entityInfo?.createdBy?.name || act.userEmail || act.record_email)}
+                      </td>
+
                       <td className="px-4 py-4 font-medium text-slate-900">
                         <div className="max-w-[320px] sm:max-w-[420px] truncate text-xs font-semibold">
                           {act.message}
@@ -381,7 +587,7 @@ export default function ActivityFeedView({
                           className="px-3 py-1.5 rounded-xl bg-orange-50 hover:bg-orange-100 text-[#EE3124] border border-orange-200 font-bold text-xs inline-flex items-center gap-1 transition-colors"
                         >
                           <Info className="w-3.5 h-3.5" />
-                          <span>Inspect JSON</span>
+                          <span>View Details</span>
                         </button>
                       </td>
                     </tr>
@@ -392,7 +598,7 @@ export default function ActivityFeedView({
 
             {/* Pagination Footer */}
             {filteredActivities.length > pageSize && (
-              <div className="px-4 py-3.5 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+              <div className="shrink-0 px-4 py-3 bg-slate-50 border-t border-slate-200/80 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
                 <div>
                   Showing <span className="font-bold text-slate-800">{(currentPage - 1) * pageSize + 1}</span> to{' '}
                   <span className="font-bold text-slate-800">
@@ -436,8 +642,8 @@ export default function ActivityFeedView({
                   <Activity className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-base text-slate-900">Activity Log Inspection</h3>
-                  <p className="text-xs text-slate-500 font-medium">ID: {selectedActivity.id}</p>
+                  <h3 className="font-extrabold text-base text-slate-900">Activity Record Details</h3>
+                  <p className="text-xs text-slate-500 font-medium">Record ID: {selectedActivity.id}</p>
                 </div>
               </div>
               <button
@@ -476,9 +682,10 @@ export default function ActivityFeedView({
               {(() => {
                 const bracketName = selectedActivity.message?.match(/^\[([^\]]+)\]/)?.[1];
                 const byName = selectedActivity.message?.match(/by ([^:]+):/)?.[1];
-                const creatorName = selectedActivity.entityInfo?.createdBy?.name || bracketName || byName || selectedActivity.entityInfo?.createdBy?.email || 'Admin User';
-                const userRole = selectedActivity.entityInfo?.createdBy?.role || 'Super Admin';
-                const sourceName = selectedActivity.entityInfo?.lead_source || selectedActivity.entityInfo?.source || 'Admin Dashboard';
+                const creatorName = selectedActivity.entityInfo?.createdBy?.name || bracketName || byName || selectedActivity.entityInfo?.createdBy?.email || 'Team User';
+                const rawRole = selectedActivity.entityInfo?.createdBy?.role || 'Super Admin';
+                const userRole = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Super Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
+                const sourceName = selectedActivity.entityInfo?.lead_source || selectedActivity.entityInfo?.source || 'Bridge Portal';
 
                 return (
                   <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-50/80 via-slate-50 to-orange-50/40 border border-purple-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
@@ -499,7 +706,7 @@ export default function ActivityFeedView({
 
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Lead Source:</span>
-                      {getSourceBadge(sourceName)}
+                      {getSourceBadge(sourceName, creatorName)}
                     </div>
                   </div>
                 );
@@ -590,23 +797,8 @@ export default function ActivityFeedView({
                 );
               })()}
 
-              {selectedActivity.entityInfo && (
-                <div>
-                  <span className="text-xs font-bold text-slate-700 block mb-1">Entity Payload</span>
-                  <pre className="p-3.5 bg-slate-900 text-slate-100 rounded-2xl font-mono text-[11px] overflow-x-auto">
-                    {JSON.stringify(selectedActivity.entityInfo, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              {selectedActivity.details && (
-                <div>
-                  <span className="text-xs font-bold text-slate-700 block mb-1">Raw Response Payload</span>
-                  <pre className="p-3.5 bg-slate-900 text-slate-100 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-48">
-                    {JSON.stringify(selectedActivity.details, null, 2)}
-                  </pre>
-                </div>
-              )}
+              {/* Professional Associated Record Properties Card */}
+              <ActivityPropertiesCard activity={selectedActivity} />
             </div>
 
             <div className="pt-2 flex items-center justify-end">

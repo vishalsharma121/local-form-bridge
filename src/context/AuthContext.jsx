@@ -40,11 +40,21 @@ export function AuthProvider({ children }) {
 
           if (data && data.user) {
             setUser(prev => {
-              if (prev && prev.name === data.user.name && prev.role === data.user.role && prev.email === data.user.email) {
+              if (
+                prev &&
+                prev.name === data.user.name &&
+                prev.role === data.user.role &&
+                prev.email === data.user.email &&
+                JSON.stringify(prev.permissions) === JSON.stringify(data.user.permissions)
+              ) {
                 return prev;
               }
               return data.user;
             });
+            if (data.token && data.token !== token) {
+              localStorage.setItem('app_auth_token', data.token);
+              setToken(data.token);
+            }
           } else {
             console.log('❌ [AuthContext] Call branch 1 (res.ok but invalid data) -> logout()');
             logout();
@@ -68,20 +78,37 @@ export function AuthProvider({ children }) {
     };
   }, [token]);
 
-  // Window focus listener to refresh role/name immediately without resetting token or triggering re-fetch loops
+  // Window focus listener to refresh role/name/permissions immediately
   useEffect(() => {
     if (!token) return;
     const handleFocus = () => {
       fetch('/api/auth', { headers: { 'Authorization': `Bearer ${token}` } })
-        .then(res => res.ok ? res.json() : null)
+        .then(res => {
+          if (res.status === 401 || res.status === 403) {
+            console.warn(`⛔ [AuthContext] Focus check failed (status ${res.status}). Logging out.`);
+            logout('focus_account_revoked', 'Your account has been deleted or deactivated. Session terminated.');
+            return null;
+          }
+          return res.ok ? res.json() : null;
+        })
         .then(data => {
           if (data && data.user) {
             setUser(prev => {
-              if (prev && prev.name === data.user.name && prev.role === data.user.role && prev.email === data.user.email) {
+              if (
+                prev &&
+                prev.name === data.user.name &&
+                prev.role === data.user.role &&
+                prev.email === data.user.email &&
+                JSON.stringify(prev.permissions) === JSON.stringify(data.user.permissions)
+              ) {
                 return prev;
               }
               return data.user;
             });
+            if (data.token && data.token !== token) {
+              localStorage.setItem('app_auth_token', data.token);
+              setToken(data.token);
+            }
           }
         })
         .catch(() => {});
@@ -89,6 +116,59 @@ export function AuthProvider({ children }) {
 
     window.addEventListener('focus', handleFocus);
     return () => window.removeEventListener('focus', handleFocus);
+  }, [token]);
+
+  // Live heartbeat session check (every 5 seconds)
+  // Ensures that when an admin deletes or deactivates a user, their app immediately kicks them out
+  useEffect(() => {
+    if (!token) return;
+    let isCancelled = false;
+
+    const checkLiveSession = async () => {
+      try {
+        const res = await fetch('/api/auth', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (isCancelled) return;
+
+        if (res.status === 401 || res.status === 403) {
+          console.warn(`⛔ [AuthContext] Live session terminated (status: ${res.status}). Logging out immediately.`);
+          logout('account_deleted_or_deactivated', 'Your account has been deleted or deactivated by an administrator. Session terminated.');
+          return;
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          if (isCancelled) return;
+          if (data && data.user) {
+            setUser(prev => {
+              if (
+                prev &&
+                prev.name === data.user.name &&
+                prev.role === data.user.role &&
+                prev.email === data.user.email &&
+                JSON.stringify(prev.permissions) === JSON.stringify(data.user.permissions)
+              ) {
+                return prev;
+              }
+              return data.user;
+            });
+            if (data.token && data.token !== token) {
+              localStorage.setItem('app_auth_token', data.token);
+              setToken(data.token);
+            }
+          }
+        }
+      } catch {
+        // Offline / network glitch, preserve session
+      }
+    };
+
+    const interval = setInterval(checkLiveSession, 5000);
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+    };
   }, [token]);
 
   const login = async (email, password) => {
@@ -118,16 +198,12 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const logout = (reason = 'user_action') => {
+  const logout = (reason = 'user_action', message = '') => {
     console.log(`🚪 [AuthContext] logout() called! Reason: ${reason}`);
     localStorage.removeItem('app_auth_token');
     setToken(null);
     setUser(null);
-    setAuthError('');
-  };
-
-  const can = (action) => {
-    return checkCan(user?.role, action);
+    setAuthError(message || '');
   };
 
   const getAuthHeaders = React.useCallback(() => {
@@ -162,6 +238,10 @@ export function AuthProvider({ children }) {
     }
   };
 
+  const can = (action, module) => {
+    return checkCan(user, action, module);
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -176,7 +256,8 @@ export function AuthProvider({ children }) {
         can,
         getAuthHeaders,
         isSuperAdmin: user?.role === 'super_admin',
-        isAdmin: user?.role === 'admin' || user?.role === 'super_admin',
+        isAdmin: user?.role === 'user' || user?.role === 'admin' || user?.role === 'super_admin',
+        isUser: user?.role === 'user' || user?.role === 'admin',
         isViewer: user?.role === 'viewer',
       }}
     >

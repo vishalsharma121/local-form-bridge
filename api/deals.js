@@ -12,9 +12,13 @@ export default async function handler(req, res) {
             console.log('FEB [API] /api/deals (GET) called');
 
             const auth = await authenticateRequest(req);
-            if (!auth.authenticated || !can(auth.user?.role, 'view')) {
+            if (!auth.authenticated) {
                 console.log('❌ [API] Unauthorized admin request');
                 return res.status(401).json({ error: 'Unauthorized. Please log in.' });
+            }
+            if (!can(auth.user, 'view', 'deals')) {
+                console.log('⚠️ [API] Access restricted to deals');
+                return res.status(403).json({ error: 'Access restricted to deals.' });
             }
 
             const token = getHubSpotToken();
@@ -24,7 +28,7 @@ export default async function handler(req, res) {
             }
 
             const response = await fetch(
-                'https://api.hubapi.com/crm/v3/objects/deals?limit=100&properties=dealname,pipeline,dealstage,amount,lead_source,createdate',
+                'https://api.hubapi.com/crm/v3/objects/deals?limit=100&properties=dealname,pipeline,dealstage,amount,closedate,hubspot_owner_id,dealtype,hs_priority,lead_source,description,createdate',
                 { headers: { Authorization: `Bearer ${token}` } }
             );
 
@@ -46,9 +50,25 @@ export default async function handler(req, res) {
             const deals = (data.results || []).map((d) => {
                 const srcInfo = sourcesMap[String(d.id)];
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
-                const leadSource = d.properties.lead_source || srcName || 'HubSpot / Unknown';
+                const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
+                const creatorEmail = typeof srcInfo === 'object' ? srcInfo?.created_by_email : null;
+                const description = d.properties.description || '';
 
                 let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+
+                const isPortalCreator = creator && !creator.toLowerCase().includes('hubspot') && !creator.toLowerCase().includes('public') && !creator.toLowerCase().includes('website');
+                let leadSource = srcName || d.properties.lead_source || 'HubSpot Direct';
+
+                if (isPortalCreator || creatorUserId) {
+                    leadSource = 'Admin Dashboard';
+                } else if (creator === 'Public Lead Form' || (leadSource || '').toLowerCase().includes('website')) {
+                    leadSource = 'Website Form';
+                } else if ((leadSource || '').toLowerCase().includes('webhook')) {
+                    leadSource = 'HubSpot Webhook';
+                } else if (!leadSource || leadSource === 'HubSpot CRM' || leadSource === 'HubSpot / Unknown') {
+                    leadSource = 'HubSpot Direct';
+                }
+
                 if (!creator) {
                     if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
                         creator = 'Public Lead Form';
@@ -65,8 +85,15 @@ export default async function handler(req, res) {
                     pipeline: d.properties.pipeline || 'default',
                     dealstage: d.properties.dealstage || 'appointmentscheduled',
                     amount: d.properties.amount || '0',
+                    closedate: d.properties.closedate || null,
+                    hubspot_owner_id: d.properties.hubspot_owner_id || '',
+                    dealtype: d.properties.dealtype || '',
+                    hs_priority: d.properties.hs_priority || '',
                     lead_source: leadSource,
                     created_by: creator,
+                    created_by_user_id: creatorUserId,
+                    created_by_email: creatorEmail,
+                    description: description,
                     createdate: d.properties.createdate,
                 };
             }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
@@ -92,8 +119,31 @@ export default async function handler(req, res) {
                 console.warn('⚠️ [API] Failed to fetch pipelines:', pErr.message);
             }
 
-            console.log(`✅ [API] Returning ${deals.length} deals and ${pipelines.length} pipelines`);
-            return res.status(200).json({ deals, pipelines });
+            // Role-based visibility: Super Admin sees all deals, Team Member only sees self-created deals
+            const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin';
+            let visibleDeals = deals;
+
+            if (!isSuperAdmin) {
+                const userName = (auth.user?.name || '').toLowerCase().trim();
+                const userEmail = (auth.user?.email || '').toLowerCase().trim();
+                const userId = Number(auth.user?.userId || auth.user?.id);
+
+                visibleDeals = deals.filter((d) => {
+                    const matchCreatorName = d.created_by && d.created_by.toLowerCase().trim() === userName;
+                    const matchCreatorEmail = d.created_by_email && d.created_by_email.toLowerCase().trim() === userEmail;
+                    const matchCreatorId = d.created_by_user_id && Number(d.created_by_user_id) === userId;
+                    const matchDescription = d.description && (
+                        (userEmail && d.description.toLowerCase().includes(userEmail)) ||
+                        (userName && d.description.toLowerCase().includes(userName))
+                    );
+
+                    return Boolean(matchCreatorName || matchCreatorEmail || matchCreatorId || matchDescription);
+                });
+                console.log(`🔒 [API/Deals] Filtered deals for team member "${auth.user?.email}": ${visibleDeals.length} of ${deals.length} deals visible`);
+            }
+
+            console.log(`✅ [API] Returning ${visibleDeals.length} deals (total ${deals.length}) and ${pipelines.length} pipelines`);
+            return res.status(200).json({ deals: visibleDeals, pipelines });
         } catch (err) {
             console.error('🔥 [API] Unexpected error:', err);
             return res.status(500).json({ error: 'Failed to load deals.' });
@@ -108,11 +158,22 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'create')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot create deals.' });
+            if (!can(auth.user, 'create', 'deals')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow creating deals.' });
             }
 
-            const { dealname, pipeline, dealstage, amount, contactId, companyId } = req.body || {};
+            const {
+                dealname,
+                pipeline,
+                dealstage,
+                amount,
+                closedate,
+                hubspot_owner_id,
+                dealtype,
+                hs_priority,
+                contactId,
+                companyId,
+            } = req.body || {};
 
             if (!dealname?.trim()) {
                 return res.status(400).json({ error: 'Deal name is required.' });
@@ -151,7 +212,7 @@ export default async function handler(req, res) {
 
             const finalAmount = parseNumericAmount(amount);
 
-            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
+            const chosenOwnerId = hubspot_owner_id || (await getHubSpotOwnerIdByEmail(auth.user?.email));
 
             const userName = auth.user?.name || 'Admin User';
             const userEmail = auth.user?.email || 'admin@system';
@@ -165,9 +226,28 @@ export default async function handler(req, res) {
                 lead_source: 'Admin Dashboard',
             };
 
-            if (ownerId) {
-                properties.hubspot_owner_id = ownerId;
-                console.log(`👤 [API] Setting HubSpot Owner ID ${ownerId} for deal created by "${userEmail}"`);
+            if (closedate) {
+                try {
+                    const d = new Date(closedate);
+                    if (!isNaN(d.getTime())) {
+                        properties.closedate = d.toISOString();
+                    }
+                } catch {
+                    properties.closedate = closedate;
+                }
+            }
+
+            if (chosenOwnerId) {
+                properties.hubspot_owner_id = String(chosenOwnerId);
+                console.log(`👤 [API] Setting HubSpot Owner ID ${chosenOwnerId} for deal created by "${userEmail}"`);
+            }
+
+            if (dealtype && String(dealtype).trim()) {
+                properties.dealtype = String(dealtype).trim();
+            }
+
+            if (hs_priority && String(hs_priority).trim()) {
+                properties.hs_priority = String(hs_priority).trim();
             }
 
             const safeHubSpotFetch = async (url, opts) => {
@@ -187,6 +267,14 @@ export default async function handler(req, res) {
                                 }
                                 if (parsed.properties && parsed.properties.hubspot_owner_id && errData.message?.includes('hubspot_owner_id')) {
                                     delete parsed.properties.hubspot_owner_id;
+                                    modified = true;
+                                }
+                                if (parsed.properties && parsed.properties.dealtype && errData.message?.includes('dealtype')) {
+                                    delete parsed.properties.dealtype;
+                                    modified = true;
+                                }
+                                if (parsed.properties && parsed.properties.hs_priority && errData.message?.includes('hs_priority')) {
+                                    delete parsed.properties.hs_priority;
                                     modified = true;
                                 }
                                 if (modified) {
@@ -309,11 +397,11 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'edit')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot edit deals.' });
+            if (!can(auth.user, 'edit', 'deals')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow editing deals.' });
             }
 
-            const { id, dealname, pipeline, dealstage, amount } = req.body || {};
+            const { id, dealname, pipeline, dealstage, amount, closedate, hubspot_owner_id, dealtype, hs_priority } = req.body || {};
             const dealId = id || req.query?.id;
 
             if (!dealId) {
@@ -334,11 +422,32 @@ export default async function handler(req, res) {
                 const num = parseFloat(cleaned);
                 properties.amount = isNaN(num) || num < 0 ? '0' : String(num);
             }
+            if (closedate !== undefined) {
+                if (closedate) {
+                    try {
+                        const d = new Date(closedate);
+                        properties.closedate = !isNaN(d.getTime()) ? d.toISOString() : closedate;
+                    } catch {
+                        properties.closedate = closedate;
+                    }
+                } else {
+                    properties.closedate = '';
+                }
+            }
+            if (hubspot_owner_id !== undefined) {
+                properties.hubspot_owner_id = String(hubspot_owner_id || '').trim();
+            }
+            if (dealtype !== undefined) {
+                properties.dealtype = String(dealtype || '').trim();
+            }
+            if (hs_priority !== undefined) {
+                properties.hs_priority = String(hs_priority || '').trim();
+            }
 
             let oldRecord = {};
             try {
                 const getOldRes = await fetch(
-                    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=dealname,pipeline,dealstage,amount`,
+                    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=dealname,pipeline,dealstage,amount,closedate,hubspot_owner_id,dealtype,hs_priority`,
                     { headers: { Authorization: `Bearer ${token}` } }
                 );
                 if (getOldRes.ok) {
@@ -378,6 +487,21 @@ export default async function handler(req, res) {
             if (newAmount !== oldAmount) {
                 changes.amount = { old: `$${Number(oldAmount).toLocaleString()}`, new: `$${Number(newAmount).toLocaleString()}` };
                 diffParts.push(`Amount ("$${Number(oldAmount).toLocaleString()}" → "$${Number(newAmount).toLocaleString()}")`);
+            }
+
+            if (properties.closedate !== undefined && properties.closedate !== (oldRecord.closedate || '')) {
+                changes.closedate = { old: oldRecord.closedate || '—', new: properties.closedate || '—' };
+                diffParts.push(`Close Date ("${oldRecord.closedate || '—'}" → "${properties.closedate || '—'}")`);
+            }
+
+            if (properties.dealtype !== undefined && properties.dealtype !== (oldRecord.dealtype || '')) {
+                changes.dealtype = { old: oldRecord.dealtype || '—', new: properties.dealtype || '—' };
+                diffParts.push(`Deal Type ("${oldRecord.dealtype || '—'}" → "${properties.dealtype || '—'}")`);
+            }
+
+            if (properties.hs_priority !== undefined && properties.hs_priority !== (oldRecord.hs_priority || '')) {
+                changes.hs_priority = { old: oldRecord.hs_priority || '—', new: properties.hs_priority || '—' };
+                diffParts.push(`Priority ("${oldRecord.hs_priority || '—'}" → "${properties.hs_priority || '—'}")`);
             }
 
             const diffSummary = diffParts.length > 0
@@ -447,11 +571,6 @@ export default async function handler(req, res) {
                 }
             };
 
-            const ownerId = await getHubSpotOwnerIdByEmail(auth.user?.email);
-            if (ownerId) {
-                properties.hubspot_owner_id = ownerId;
-            }
-
             const response = await safeHubSpotPatch(
                 `https://api.hubapi.com/crm/v3/objects/deals/${dealId}`,
                 token,
@@ -505,8 +624,8 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
-            if (!can(auth.user?.role, 'delete')) {
-                return res.status(403).json({ error: 'Permission denied. Your role cannot delete deals.' });
+            if (!can(auth.user, 'delete', 'deals')) {
+                return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow deleting deals.' });
             }
 
             const dealId = req.query?.id || req.body?.id;
