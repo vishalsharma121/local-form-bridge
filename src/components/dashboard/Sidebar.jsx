@@ -109,7 +109,7 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
   ];
 
   const getRoleLabel = (role) => {
-    if (role === 'super_admin' || role === 'super admin') return 'Super Admin';
+    if (role === 'super_admin' || role === 'super admin') return 'Admin';
     return 'Team Member';
   };
 

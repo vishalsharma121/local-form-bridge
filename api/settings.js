@@ -22,7 +22,7 @@ export default async function handler(req, res) {
 
         if (req.method === 'POST' || req.method === 'PUT') {
             if (!can(auth.user?.role, 'settings')) {
-                return res.status(403).json({ error: 'Permission denied. Only Super Admin can change settings.' });
+                return res.status(403).json({ error: 'Permission denied. Only Admins can change settings.' });
             }
             const { key, value, settings } = req.body || {};
 

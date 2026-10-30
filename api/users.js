@@ -23,7 +23,7 @@ export default async function handler(req, res) {
 
     // Only super_admin can manage team members
     if (!can(user.role, 'manageUsers')) {
-        return res.status(403).json({ error: 'Access denied. Only Super Admin can manage team members.' });
+        return res.status(403).json({ error: 'Access denied. Only Admins can manage team members.' });
     }
 
     if (req.method === 'GET') {

@@ -125,11 +125,11 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
     return acc;
   }, {});
 
-  // Recent contacts (sized to naturally fill card height)
-  const recentContacts = contacts.slice(0, 7);
+  // Recent contacts (sized to naturally balance with left analytics card)
+  const recentContacts = contacts.slice(0, 6);
 
   return (
-    <div className="h-full flex flex-col justify-between space-y-3.5 animate-fade-in font-sans">
+    <div className="flex flex-col space-y-4 animate-fade-in font-sans w-full pb-6">
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 shrink-0">
         {/* Total Contacts */}
@@ -298,19 +298,19 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
       </div>
 
       {/* Main Section: Operations Banner, Breakdown & Stream */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 flex-1 min-h-0">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 w-full items-start">
         {/* Left Column (2 cols): Operations Banner & Subject Breakdown */}
-        <div className="lg:col-span-2 flex flex-col justify-between space-y-3.5 h-full min-h-0">
+        <div className="lg:col-span-2 flex flex-col space-y-4">
           {/* Quick Action Banner */}
-          <div className="bg-gradient-to-r from-orange-500/10 via-red-500/5 to-orange-500/10 bg-white rounded-2xl p-4 sm:px-5 sm:py-3.5 border border-orange-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] relative overflow-hidden shrink-0">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="bg-gradient-to-r from-orange-500/10 via-red-500/5 to-orange-500/10 bg-white rounded-2xl p-3.5 sm:px-4 sm:py-3 border border-orange-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] relative overflow-hidden shrink-0">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
               <div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100/80 border border-orange-200 text-[#EE3124] text-xs font-extrabold mb-1.5">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100/80 border border-orange-200 text-[#EE3124] text-xs font-extrabold mb-1">
                   <Sparkles className="w-3.5 h-3.5 text-[#F7941D]" />
                   <span>StarkEdge Integration Platform</span>
                 </div>
-                <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">Two-Way CRM Operations Hub</h2>
-                <p className="text-xs text-slate-500 mt-0.5 max-w-md leading-relaxed font-medium">
+                <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">Two-Way CRM Operations Hub</h2>
+                <p className="text-xs text-slate-500 mt-0.5 max-w-md leading-snug font-medium line-clamp-2">
                   Monitor live two-way synchronization between this portal and HubSpot CRM, review Contacts, Companies, and Deals, or trigger on-demand sync operations.
                 </p>
               </div>
@@ -357,7 +357,7 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
           </div>
 
           {/* Executive Channel Distribution & Analytics Card */}
-          <div className="flex-1 min-h-0 flex flex-col justify-between bg-white rounded-2xl p-4 sm:p-4.5 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all">
+          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all flex flex-col space-y-4">
             <div>
               {/* Header */}
               <div className="flex items-center justify-between mb-3.5 pb-2.5 border-b border-slate-100">
@@ -381,7 +381,7 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
                   No contact submissions recorded yet to visualize channel breakdown.
                 </div>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-3.5 sm:space-y-4">
                   {/* Stacked Visual Bar with Segment Labels */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between text-xs font-bold text-slate-600">
@@ -514,9 +514,9 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
                               </div>
                             </div>
 
-                            <div className="p-3.5 rounded-2xl bg-slate-50/90 border border-slate-200/80 flex items-center gap-3 shadow-2xs">
-                              <div className="w-9 h-9 rounded-xl bg-orange-50 text-[#EE3124] flex items-center justify-center border border-orange-200/60 shrink-0 shadow-2xs">
-                                <ShieldCheck className="w-4.5 h-4.5" />
+                            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50/90 border border-slate-200/80 flex items-center gap-2.5 shadow-2xs">
+                              <div className="w-8 h-8 rounded-lg bg-orange-50 text-[#EE3124] flex items-center justify-center border border-orange-200/60 shrink-0 shadow-2xs">
+                                <ShieldCheck className="w-4 h-4" />
                               </div>
                               <div className="min-w-0">
                                 <div className="text-xs font-black text-slate-900">Deduplication</div>
@@ -524,9 +524,9 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
                               </div>
                             </div>
 
-                            <div className="p-3.5 rounded-2xl bg-slate-50/90 border border-slate-200/80 flex items-center gap-3 shadow-2xs">
-                              <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200/60 shrink-0 shadow-2xs">
-                                <Globe className="w-4.5 h-4.5" />
+                            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50/90 border border-slate-200/80 flex items-center gap-2.5 shadow-2xs">
+                              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200/60 shrink-0 shadow-2xs">
+                                <Globe className="w-4 h-4" />
                               </div>
                               <div className="min-w-0">
                                 <div className="text-xs font-black text-slate-900">Bidirectional Parity</div>
@@ -543,7 +543,7 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
             </div>
 
             {/* Bottom Executive Intelligence Summary Footer */}
-            <div className="mt-4 pt-3.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs bg-slate-50/80 p-3 sm:px-4 rounded-2xl border border-slate-200/70">
+            <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs bg-slate-50/80 p-2.5 sm:px-3 rounded-xl border border-slate-200/70">
               <div className="flex items-center gap-2 text-slate-600 font-medium">
                 <Zap className="w-4 h-4 text-emerald-500 shrink-0" />
                 {(() => {
@@ -580,8 +580,8 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
         </div>
 
         {/* Right Column (1 col): Recent Submissions Feed */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all flex flex-col justify-between h-full min-h-0">
-          <div className="flex-1 flex flex-col min-h-0">
+        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all flex flex-col justify-between space-y-4">
+          <div className="flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-slate-100 shrink-0">
               <div className="flex items-center gap-2.5">
@@ -628,7 +628,7 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
                 </button>
               </div>
             ) : (
-              <div className="space-y-2 flex-1 flex flex-col justify-between py-1">
+              <div className="space-y-2 py-1">
                 {recentContacts.map((c) => {
                   const source = c.lead_source || 'HubSpot / Unknown';
                   const initials = c.name 

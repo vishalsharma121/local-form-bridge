@@ -706,7 +706,7 @@ export default function ErrorLogsView({
                 {(() => {
                   const creatorName = selectedLog.entityInfo?.createdBy?.name || selectedLog.entityInfo?.createdBy?.email || 'Team User';
                   const rawRole = selectedLog.entityInfo?.createdBy?.role || 'User';
-                  const userRole = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Super Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
+                  const userRole = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
                   const sourceName = selectedLog.entityInfo?.lead_source || selectedLog.entityInfo?.source || (selectedLog.target ? 'Admin Dashboard' : 'HubSpot / Unknown');
 
                   return (

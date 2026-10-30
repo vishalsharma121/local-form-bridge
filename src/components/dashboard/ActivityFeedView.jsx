@@ -683,8 +683,8 @@ export default function ActivityFeedView({
                 const bracketName = selectedActivity.message?.match(/^\[([^\]]+)\]/)?.[1];
                 const byName = selectedActivity.message?.match(/by ([^:]+):/)?.[1];
                 const creatorName = selectedActivity.entityInfo?.createdBy?.name || bracketName || byName || selectedActivity.entityInfo?.createdBy?.email || 'Team User';
-                const rawRole = selectedActivity.entityInfo?.createdBy?.role || 'Super Admin';
-                const userRole = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Super Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
+                const rawRole = selectedActivity.entityInfo?.createdBy?.role || 'Admin';
+                const userRole = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
                 const sourceName = selectedActivity.entityInfo?.lead_source || selectedActivity.entityInfo?.source || 'Bridge Portal';
 
                 return (

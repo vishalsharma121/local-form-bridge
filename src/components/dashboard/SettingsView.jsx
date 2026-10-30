@@ -186,11 +186,11 @@ export default function SettingsView({ onLogout }) {
             <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Assigned Role</div>
             <div className="mt-1">
               <span className="text-xs font-extrabold px-3 py-1 rounded-full bg-purple-600 text-white shadow-2xs inline-block">
-                {user?.role ? user.role.toUpperCase() : 'SUPER ADMIN'}
+                {(user?.role === 'super_admin' || user?.role === 'super admin') ? 'ADMIN' : (user?.role ? user.role.toUpperCase() : 'ADMIN')}
               </span>
             </div>
             <div className="text-xs font-semibold text-slate-500 mt-1">
-              Full System Privileges (All Modules & Webhooks)
+              Full System Privileges & Configuration
             </div>
           </div>
 
@@ -448,6 +448,17 @@ export default function SettingsView({ onLogout }) {
               <div className="font-mono text-slate-700 bg-white px-2 py-1 rounded-lg border border-slate-200/80 font-bold text-xs truncate">
                 GET /api/deals
               </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2.5 pt-1">
+            <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-200/60 text-xs">
+              <span className="text-slate-400 font-semibold block text-[11px]">API Protocol</span>
+              <span className="text-slate-800 font-bold">REST v3 / HTTPS JSON</span>
+            </div>
+            <div className="p-2.5 rounded-xl bg-slate-50/70 border border-slate-200/60 text-xs">
+              <span className="text-slate-400 font-semibold block text-[11px]">Auth Standard</span>
+              <span className="text-purple-600 font-bold">Bearer Token / JWT</span>
             </div>
           </div>
         </div>

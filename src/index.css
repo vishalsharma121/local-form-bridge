@@ -43,22 +43,28 @@ textarea:focus {
 }
 
 /* Custom Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(238, 49, 36, 0.3) transparent;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.03);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   background: rgba(238, 49, 36, 0.25);
   border-radius: 9999px;
+  transition: background 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(247, 148, 29, 0.5);
+  background: rgba(247, 148, 29, 0.6);
 }
 
 /* StarkEdge Utilities */

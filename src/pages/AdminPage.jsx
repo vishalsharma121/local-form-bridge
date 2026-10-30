@@ -404,7 +404,13 @@ function AdminDashboardContent() {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 lg:h-[calc(100vh-2.5rem)] lg:my-5 lg:mr-5">
+      <div className={`flex-1 flex flex-col min-w-0 ${
+        activeTab === 'overview'
+          ? 'lg:h-[calc(100vh-2.5rem)] lg:my-5 lg:mr-0 overflow-y-auto pr-2'
+          : activeTab === 'settings'
+          ? 'lg:h-[calc(100vh-2.5rem)] lg:my-5 lg:mr-5 overflow-y-auto pr-1.5' 
+          : 'lg:h-[calc(100vh-2.5rem)] lg:my-5 lg:mr-5 overflow-hidden'
+      }`}>
         <Header
           activeTab={activeTab}
           onRefresh={handleManualRefresh}
@@ -427,7 +433,11 @@ function AdminDashboardContent() {
         />
 
         {/* Dynamic View Body */}
-        <main className={`flex-1 p-4 sm:p-6 lg:pt-3.5 lg:pb-0 lg:px-0 w-full min-h-0 flex flex-col ${activeTab === 'settings' ? 'overflow-y-auto pr-1' : 'overflow-hidden'}`}>
+        <main className={`flex-1 px-4 sm:px-6 pt-4 sm:pt-6 pb-0 lg:pt-3 lg:pb-0 lg:px-0 w-full min-h-0 flex flex-col ${
+          activeTab === 'settings' || activeTab === 'overview'
+            ? 'overflow-visible' 
+            : 'overflow-hidden'
+        }`}>
           {activeTab === 'overview' && (
             <OverviewView
               contacts={filteredContacts}

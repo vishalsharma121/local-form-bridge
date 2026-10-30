@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { getUserEffectivePermissions, formatRole } from '../../../lib/permissions';
 import { 
   UserCheck, 
+  UserX,
   Plus, 
   X, 
   CheckCircle2, 
@@ -199,10 +200,10 @@ export default function TeamMembersView() {
           view: Boolean(addFormData.canAccessActivity)
         },
         logs: {
-          view: addFormData.accessLevel === 'full'
+          view: false
         },
         retry: {
-          view: addFormData.accessLevel === 'full'
+          view: false
         }
       };
 
@@ -424,10 +425,10 @@ export default function TeamMembersView() {
         view: effective.activity?.view ?? true
       },
       logs: {
-        view: effective.logs?.view ?? true
+        view: effective.logs?.view ?? false
       },
       retry: {
-        view: effective.retry?.view ?? true
+        view: effective.retry?.view ?? false
       }
     });
     setPermissionsModalUser(u);
@@ -483,8 +484,8 @@ export default function TeamMembersView() {
           companies: { view: true, create: true, edit: true, delete: true },
           deals: { view: true, create: true, edit: true, delete: true },
           activity: { view: true },
-          logs: { view: true },
-          retry: { view: true }
+          logs: { view: false },
+          retry: { view: false }
         };
       }
       if (presetType === 'view_only') {
@@ -493,7 +494,7 @@ export default function TeamMembersView() {
           companies: { view: true, create: false, edit: false, delete: false },
           deals: { view: true, create: false, edit: false, delete: false },
           activity: { view: true },
-          logs: { view: true },
+          logs: { view: false },
           retry: { view: false }
         };
       }
@@ -551,7 +552,7 @@ export default function TeamMembersView() {
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-50 text-purple-700 border border-purple-200/90 text-[11px] font-extrabold shadow-2xs">
           <Crown className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-          <span>Full System Access (All Modules)</span>
+          <span>Full System Access</span>
         </span>
       );
     }
@@ -580,13 +581,13 @@ export default function TeamMembersView() {
     }
 
     return (
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1.5 whitespace-nowrap">
         {modules.map((m) => {
           const ModIcon = m.icon;
           return (
             <span
               key={m.label}
-              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[11px] font-bold shadow-2xs ${m.color}`}
+              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10.5px] font-bold shadow-2xs ${m.color}`}
             >
               <ModIcon className="w-3 h-3 shrink-0" />
               <span>{m.label}</span>
@@ -600,15 +601,15 @@ export default function TeamMembersView() {
   const getRoleBadge = (role) => {
     if (role === 'super_admin' || role === 'super admin') {
       return (
-        <span className="px-3 py-1 text-[11px] font-extrabold rounded-xl bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-600 text-white shadow-sm shadow-purple-600/25 inline-flex items-center gap-1.5 border border-purple-400/30">
-          <Crown className="w-3.5 h-3.5 text-purple-200" />
-          <span>Super Admin</span>
+        <span className="px-2.5 py-1 text-[11px] font-extrabold rounded-lg bg-purple-50 text-purple-700 border border-purple-200/90 inline-flex items-center gap-1.5 shadow-2xs">
+          <Crown className="w-3.5 h-3.5 text-purple-600" />
+          <span>Admin</span>
         </span>
       );
     }
 
     return (
-      <span className="px-3 py-1 text-[11px] font-extrabold rounded-xl bg-slate-100 text-slate-700 border border-slate-200/90 inline-flex items-center gap-1.5 shadow-2xs">
+      <span className="px-2.5 py-1 text-[11px] font-extrabold rounded-lg bg-slate-100 text-slate-700 border border-slate-200/90 inline-flex items-center gap-1.5 shadow-2xs">
         <User className="w-3.5 h-3.5 text-slate-500" />
         <span>Team Member</span>
       </span>
@@ -641,7 +642,7 @@ export default function TeamMembersView() {
             <h2 className="text-lg font-extrabold text-slate-900 flex items-center gap-2.5">
               <span>Team Members & Role Access</span>
               <span className="px-2.5 py-0.5 text-[10px] font-extrabold bg-purple-50 text-purple-700 border border-purple-200 rounded-full font-mono uppercase tracking-wider">
-                Super Admin Control
+                Admin Control
               </span>
             </h2>
             <p className="text-xs text-slate-500 font-medium mt-0.5">
@@ -720,7 +721,7 @@ export default function TeamMembersView() {
             className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] cursor-pointer"
           >
             <option value="all">All Members</option>
-            <option value="super_admin">Super Admins</option>
+            <option value="super_admin">Admins</option>
             <option value="user">Team Members</option>
           </select>
         </div>
@@ -732,19 +733,19 @@ export default function TeamMembersView() {
           <table className="w-full text-left text-xs font-medium text-slate-700">
             <thead className="sticky top-0 bg-slate-50/90 backdrop-blur-xs z-10 border-b border-slate-200/80 text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
               <tr>
-                <th className="px-6 py-4">User</th>
-                <th className="px-6 py-4">Email</th>
-                <th className="px-6 py-4">Role</th>
-                <th className="px-6 py-4">Access</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Created</th>
-                <th className="px-6 py-4 text-right">Actions</th>
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Email</th>
+                <th className="px-4 py-3 whitespace-nowrap">Role</th>
+                <th className="px-4 py-3 whitespace-nowrap">Access</th>
+                <th className="px-4 py-3 whitespace-nowrap">Status</th>
+                <th className="px-4 py-3 whitespace-nowrap">Created</th>
+                <th className="px-4 py-3 text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="px-6 py-12 text-center text-slate-500">
+                  <td colSpan="7" className="px-4 py-12 text-center text-slate-500">
                     <div className="flex justify-center items-center gap-2 text-xs font-bold">
                       <div className="w-5 h-5 border-2 border-[#EE3124] border-t-transparent rounded-full animate-spin" />
                       Loading team members...
@@ -753,7 +754,7 @@ export default function TeamMembersView() {
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="px-6 py-8 text-center text-slate-500 font-bold text-xs">
+                  <td colSpan="7" className="px-4 py-8 text-center text-slate-500 font-bold text-xs">
                     {searchQuery || roleFilter !== 'all' 
                       ? 'No team members match your filters.' 
                       : 'No team members found.'}
@@ -762,35 +763,30 @@ export default function TeamMembersView() {
               ) : (
                 filteredUsers.map((u) => {
                   const isSelf = currentUser?.id === u.id;
+                  const isUserAdmin = u.role === 'super_admin' || u.role === 'super admin';
                   return (
                     <tr key={u.id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="px-6 py-4 font-bold text-slate-900">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#F7941D] to-[#EE3124] flex items-center justify-center font-extrabold text-white text-xs shadow-sm shadow-orange-500/20 shrink-0">
+                      <td className="px-4 py-3 font-bold text-slate-900">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#F7941D] to-[#EE3124] flex items-center justify-center font-extrabold text-white text-xs shadow-xs shrink-0">
                             {u.name ? u.name.charAt(0).toUpperCase() : 'U'}
                           </div>
-                          <div>
-                            <div className="text-slate-900 font-extrabold text-xs">{u.name}</div>
-                            {isSelf && <span className="text-[10px] text-emerald-600 font-mono font-bold">(You)</span>}
-                            {isSuperAdmin && u.role !== 'super_admin' && (
-                              <button
-                                onClick={() => openPermissionsModal(u)}
-                                className="mt-1 px-2 py-0.5 text-[10px] font-extrabold rounded-md border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-[#EE3124] hover:border-orange-200 shadow-2xs inline-flex items-center gap-1 transition-all cursor-pointer"
-                                title="Edit CRM object permissions for this user"
-                              >
-                                <SlidersHorizontal className="w-2.5 h-2.5 text-[#EE3124]" />
-                                <span>Permissions</span>
-                              </button>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-slate-900 font-extrabold text-xs">{u.name}</span>
+                            {isSelf && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold shrink-0">
+                                You
+                              </span>
                             )}
                           </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 font-mono text-xs font-bold text-slate-700">
-                        <div className="flex items-center gap-2">
-                          <span>{u.email}</span>
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-600">
+                        <div className="flex items-center gap-1.5">
+                          <span title={u.email}>{u.email}</span>
                           <button
                             onClick={() => handleCopyEmail(u.email, u.id)}
-                            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all cursor-pointer"
+                            className="p-1 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-all cursor-pointer shrink-0"
                             title="Copy email address"
                           >
                             {copiedEmailId === u.id ? (
@@ -801,52 +797,65 @@ export default function TeamMembersView() {
                           </button>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         {getRoleBadge(u.role)}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3">
                         {renderAccessBadges(u)}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-3 whitespace-nowrap">
                         {u.is_active ? (
-                          <span className="px-2.5 py-0.5 text-[11px] font-extrabold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[11px] font-extrabold rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                             Active
                           </span>
                         ) : (
-                          <span className="px-2.5 py-0.5 text-[11px] font-extrabold rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 text-[11px] font-extrabold rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                            <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
                             Inactive
                           </span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-xs font-medium text-slate-400 font-mono">
-                        {u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A'}
+                      <td className="px-4 py-3 text-xs font-semibold text-slate-500 whitespace-nowrap">
+                        {u.created_at ? new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'N/A'}
                       </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {/* EDIT PERMISSIONS BUTTON */}
-                          {isSuperAdmin && u.role !== 'super_admin' && (
+                      <td className="px-4 py-3 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* 1. PERMISSIONS */}
+                          {isSuperAdmin && !isUserAdmin ? (
                             <button
                               onClick={() => openPermissionsModal(u)}
                               title="Manage CRM Object Permissions"
-                              className="p-2 rounded-xl text-slate-600 hover:text-[#EE3124] hover:bg-orange-50 border border-transparent hover:border-orange-200 transition-all cursor-pointer"
+                              className="w-7.5 h-7.5 rounded-lg text-slate-500 hover:text-[#EE3124] hover:bg-orange-50 border border-slate-200/60 hover:border-orange-200 transition-all flex items-center justify-center cursor-pointer"
                             >
-                              <SlidersHorizontal className="w-4 h-4" />
+                              <SlidersHorizontal className="w-3.5 h-3.5" />
                             </button>
+                          ) : (
+                            <span
+                              title="Admins have full access"
+                              className="w-7.5 h-7.5 rounded-lg text-slate-300 border border-slate-100 flex items-center justify-center cursor-not-allowed opacity-30"
+                            >
+                              <SlidersHorizontal className="w-3.5 h-3.5" />
+                            </span>
                           )}
 
-                          {/* EDIT DETAILS BUTTON */}
-                          {isSuperAdmin && (
+                          {/* 2. EDIT DETAILS */}
+                          {isSuperAdmin ? (
                             <button
                               onClick={() => openEditModal(u)}
                               title="Edit User Details"
-                              className="p-2 rounded-xl text-slate-600 hover:text-purple-700 hover:bg-purple-50 border border-transparent hover:border-purple-200 transition-all cursor-pointer"
+                              className="w-7.5 h-7.5 rounded-lg text-slate-500 hover:text-purple-700 hover:bg-purple-50 border border-slate-200/60 hover:border-purple-200 transition-all flex items-center justify-center cursor-pointer"
                             >
-                              <Pencil className="w-4 h-4" />
+                              <Pencil className="w-3.5 h-3.5" />
                             </button>
+                          ) : (
+                            <span className="w-7.5 h-7.5 rounded-lg text-slate-300 border border-slate-100 flex items-center justify-center cursor-not-allowed opacity-30">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </span>
                           )}
 
-                          {/* CHANGE PASSWORD BUTTON */}
-                          {isSuperAdmin && (
+                          {/* 3. CHANGE PASSWORD */}
+                          {isSuperAdmin ? (
                             <button
                               onClick={() => {
                                 setPasswordUser(u);
@@ -855,29 +864,40 @@ export default function TeamMembersView() {
                                 setSuccessMsg('');
                               }}
                               title="Reset / Change Password"
-                              className="p-2 rounded-xl text-slate-600 hover:text-amber-700 hover:bg-amber-50 border border-transparent hover:border-amber-200 transition-all cursor-pointer"
+                              className="w-7.5 h-7.5 rounded-lg text-slate-500 hover:text-amber-700 hover:bg-amber-50 border border-slate-200/60 hover:border-amber-200 transition-all flex items-center justify-center cursor-pointer"
                             >
-                              <Key className="w-4 h-4" />
+                              <Key className="w-3.5 h-3.5" />
                             </button>
+                          ) : (
+                            <span className="w-7.5 h-7.5 rounded-lg text-slate-300 border border-slate-100 flex items-center justify-center cursor-not-allowed opacity-30">
+                              <Key className="w-3.5 h-3.5" />
+                            </span>
                           )}
 
-                          {/* ACTIVATE / DEACTIVATE BUTTON */}
-                          {isSuperAdmin && !isSelf && (
+                          {/* 4. ACTIVATE / DEACTIVATE */}
+                          {isSuperAdmin && !isSelf ? (
                             <button
                               onClick={() => handleToggleActive(u.id, u.name, u.is_active)}
                               title={u.is_active ? "Deactivate Account" : "Activate Account"}
-                              className={`px-2.5 py-1.5 text-xs font-bold rounded-xl border transition-all cursor-pointer ${
+                              className={`w-7.5 h-7.5 rounded-lg border transition-all flex items-center justify-center cursor-pointer ${
                                 u.is_active
-                                  ? 'border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100'
-                                  : 'border-emerald-200 text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
+                                  ? 'text-slate-500 hover:text-rose-600 hover:bg-rose-50 border-slate-200/60 hover:border-rose-200'
+                                  : 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 border-emerald-200 bg-emerald-50/50'
                               }`}
                             >
-                              {u.is_active ? 'Deactivate' : 'Activate'}
+                              {u.is_active ? <UserX className="w-3.5 h-3.5" /> : <UserCheck className="w-3.5 h-3.5" />}
                             </button>
+                          ) : (
+                            <span
+                              title="Cannot deactivate your own account"
+                              className="w-7.5 h-7.5 rounded-lg text-slate-300 border border-slate-100 flex items-center justify-center cursor-not-allowed opacity-30"
+                            >
+                              <UserX className="w-3.5 h-3.5" />
+                            </span>
                           )}
 
-                          {/* DELETE USER BUTTON */}
-                          {isSuperAdmin && !isSelf && (
+                          {/* 5. DELETE */}
+                          {isSuperAdmin && !isSelf ? (
                             <button
                               onClick={() => {
                                 setDeleteTargetUser(u);
@@ -885,10 +905,17 @@ export default function TeamMembersView() {
                                 setSuccessMsg('');
                               }}
                               title="Delete Team Member"
-                              className="p-2 rounded-xl text-rose-500 hover:text-rose-700 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all cursor-pointer"
+                              className="w-7.5 h-7.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200/60 hover:border-rose-200 transition-all flex items-center justify-center cursor-pointer"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
+                          ) : (
+                            <span
+                              title="Cannot delete your own account"
+                              className="w-7.5 h-7.5 rounded-lg text-slate-300 border border-slate-100 flex items-center justify-center cursor-not-allowed opacity-30"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </span>
                           )}
                         </div>
                       </td>
@@ -898,6 +925,27 @@ export default function TeamMembersView() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Table Summary Footer */}
+        <div className="px-6 py-3 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 font-medium shrink-0">
+          <div>
+            Showing <strong className="text-slate-800 font-bold">{filteredUsers.length}</strong> of <strong className="text-slate-800 font-bold">{users.length}</strong> team members
+          </div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-purple-500" />
+              <strong className="text-slate-700 font-bold">{users.filter(u => u.role === 'super_admin' || u.role === 'super admin').length}</strong> Admins
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-blue-500" />
+              <strong className="text-slate-700 font-bold">{users.filter(u => u.role !== 'super_admin' && u.role !== 'super admin').length}</strong> Team Members
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <strong className="text-slate-700 font-bold">{users.filter(u => u.is_active).length}</strong> Active
+            </span>
+          </div>
         </div>
       </div>
 
@@ -1043,7 +1091,7 @@ export default function TeamMembersView() {
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
                         <Crown className="w-3.5 h-3.5 text-purple-600" />
-                        Super Admin
+                        Admin
                       </span>
                       {addFormData.role === 'super_admin' && <Check className="w-3.5 h-3.5 text-purple-600" />}
                     </div>
@@ -1060,34 +1108,63 @@ export default function TeamMembersView() {
                       <SlidersHorizontal className="w-3.5 h-3.5 text-[#EE3124]" />
                       <span>CRM Access Permissions</span>
                     </div>
-                    <div className="flex items-center gap-1 text-[11px] font-bold">
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold">
                       <button
                         type="button"
-                        onClick={() => setAddFormData(prev => ({ ...prev, accessLevel: 'full' }))}
+                        onClick={() => setAddFormData(prev => ({
+                          ...prev,
+                          accessLevel: 'full',
+                          canAccessContacts: true,
+                          canAccessCompanies: true,
+                          canAccessDeals: true,
+                          canAccessActivity: true
+                        }))}
                         className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all ${
-                          addFormData.accessLevel === 'full'
+                          addFormData.accessLevel === 'full' && (addFormData.canAccessContacts && addFormData.canAccessCompanies && addFormData.canAccessDeals && addFormData.canAccessActivity)
                             ? 'bg-[#EE3124] text-white shadow-xs'
-                            : 'text-slate-500 hover:text-slate-800'
+                            : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
                         }`}
                       >
                         Full Access
                       </button>
                       <button
                         type="button"
-                        onClick={() => setAddFormData(prev => ({ ...prev, accessLevel: 'view_only' }))}
+                        onClick={() => setAddFormData(prev => ({
+                          ...prev,
+                          accessLevel: 'view_only',
+                          canAccessContacts: true,
+                          canAccessCompanies: true,
+                          canAccessDeals: true,
+                          canAccessActivity: true
+                        }))}
                         className={`px-2.5 py-1 rounded-lg cursor-pointer transition-all ${
-                          addFormData.accessLevel === 'view_only'
+                          addFormData.accessLevel === 'view_only' && (addFormData.canAccessContacts && addFormData.canAccessCompanies && addFormData.canAccessDeals && addFormData.canAccessActivity)
                             ? 'bg-slate-800 text-white shadow-xs'
-                            : 'text-slate-500 hover:text-slate-800'
+                            : 'bg-white text-slate-600 hover:text-slate-900 border border-slate-200'
                         }`}
                       >
                         View Only
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAddFormData(prev => ({
+                          ...prev,
+                          canAccessContacts: false,
+                          canAccessCompanies: false,
+                          canAccessDeals: false,
+                          canAccessActivity: false
+                        }))}
+                        className="px-2.5 py-1 rounded-lg cursor-pointer transition-all text-slate-500 hover:text-rose-600 hover:bg-rose-50 border border-transparent"
+                      >
+                        Clear All
                       </button>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-700">
-                    <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-slate-200/80 cursor-pointer hover:border-slate-300">
+                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      addFormData.canAccessContacts ? 'bg-white border-orange-200 shadow-2xs' : 'bg-slate-100/60 border-slate-200/80 text-slate-400'
+                    }`}>
                       <input
                         type="checkbox"
                         checked={addFormData.canAccessContacts}
@@ -1097,7 +1174,9 @@ export default function TeamMembersView() {
                       <span>Contacts</span>
                     </label>
 
-                    <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-slate-200/80 cursor-pointer hover:border-slate-300">
+                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      addFormData.canAccessCompanies ? 'bg-white border-orange-200 shadow-2xs' : 'bg-slate-100/60 border-slate-200/80 text-slate-400'
+                    }`}>
                       <input
                         type="checkbox"
                         checked={addFormData.canAccessCompanies}
@@ -1107,7 +1186,9 @@ export default function TeamMembersView() {
                       <span>Companies</span>
                     </label>
 
-                    <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-slate-200/80 cursor-pointer hover:border-slate-300">
+                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      addFormData.canAccessDeals ? 'bg-white border-orange-200 shadow-2xs' : 'bg-slate-100/60 border-slate-200/80 text-slate-400'
+                    }`}>
                       <input
                         type="checkbox"
                         checked={addFormData.canAccessDeals}
@@ -1117,7 +1198,9 @@ export default function TeamMembersView() {
                       <span>Deals & Pipeline</span>
                     </label>
 
-                    <label className="flex items-center gap-2 p-2.5 rounded-xl bg-white border border-slate-200/80 cursor-pointer hover:border-slate-300">
+                    <label className={`flex items-center gap-2 p-2.5 rounded-xl border transition-all cursor-pointer ${
+                      addFormData.canAccessActivity ? 'bg-white border-orange-200 shadow-2xs' : 'bg-slate-100/60 border-slate-200/80 text-slate-400'
+                    }`}>
                       <input
                         type="checkbox"
                         checked={addFormData.canAccessActivity}
@@ -1127,6 +1210,15 @@ export default function TeamMembersView() {
                       <span>Activity Feed</span>
                     </label>
                   </div>
+
+                  {/* Informative notice when no modules are selected */}
+                  {!addFormData.canAccessContacts && !addFormData.canAccessCompanies && !addFormData.canAccessDeals && !addFormData.canAccessActivity && (
+                    <div className="flex items-center gap-2 p-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-semibold animate-fade-in">
+                      <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>No CRM modules selected. This member will start with restricted access until permissions are granted.</span>
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-slate-400 font-medium">You can further refine granular action rights (Create, Edit, Delete) anytime using "Edit Permissions".</p>
                 </div>
               )}
@@ -1229,7 +1321,7 @@ export default function TeamMembersView() {
                 {currentUser?.id === editUser.id ? (
                   <div className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 text-xs font-bold flex items-center gap-2">
                     <Crown className="w-4 h-4 text-purple-600 shrink-0" />
-                    <span>Super Admin (You cannot modify your own role to prevent lockout)</span>
+                    <span>Admin (You cannot modify your own role to prevent lockout)</span>
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2.5">
@@ -1264,7 +1356,7 @@ export default function TeamMembersView() {
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-xs font-extrabold text-slate-900 flex items-center gap-1.5">
                           <Crown className="w-3.5 h-3.5 text-purple-600" />
-                          Super Admin
+                          Admin
                         </span>
                         {editFormData.role === 'super_admin' && <Check className="w-3.5 h-3.5 text-purple-600" />}
                       </div>
@@ -1458,16 +1550,32 @@ export default function TeamMembersView() {
       {permissionsModalUser && userPermsDraft && createPortal(
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 bg-slate-950/60 backdrop-blur-sm animate-fade-in overflow-y-auto font-sans">
           <div className="w-full max-w-4xl bg-white rounded-3xl border border-slate-200/90 shadow-2xl overflow-hidden flex flex-col my-auto max-h-[92vh] animate-modal-pop">
-            {/* HubSpot Dark Top Banner */}
-            <div className="bg-[#181d25] px-6 py-3.5 text-white flex items-center justify-between border-b border-slate-800 shrink-0">
-              <div className="flex items-center gap-2 text-xs sm:text-sm">
-                <span className="text-slate-400">Editing access for</span>
-                <strong className="text-white font-extrabold">{permissionsModalUser.name}</strong>
-                <span className="text-slate-400 font-mono text-xs hidden sm:inline">({permissionsModalUser.email})</span>
+            {/* StarkEdge Branded Modal Header */}
+            <div className="px-6 sm:px-8 py-4.5 bg-gradient-to-r from-orange-50/80 via-white to-red-50/40 border-b border-slate-200/80 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#F7941D] to-[#EE3124] text-white flex items-center justify-center shadow-md shadow-orange-500/20 shrink-0">
+                  <SlidersHorizontal className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">
+                      Manage User Access & Permissions
+                    </h3>
+                    <span className="px-2.5 py-0.5 text-[10px] font-extrabold rounded-full bg-orange-100 text-[#EE3124] border border-orange-200 uppercase tracking-wide">
+                      {formatRole(permissionsModalUser.role)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 font-medium truncate">
+                    <span>Editing access for</span>
+                    <strong className="text-slate-800 font-bold">{permissionsModalUser.name}</strong>
+                    <span className="text-slate-400 font-mono text-[11px] hidden sm:inline">({permissionsModalUser.email})</span>
+                  </div>
+                </div>
               </div>
+
               <button
                 onClick={() => setPermissionsModalUser(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+                className="text-slate-400 hover:text-slate-700 p-2 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer shrink-0 ml-3"
                 title="Close modal"
               >
                 <X className="w-5 h-5" />
@@ -1475,42 +1583,35 @@ export default function TeamMembersView() {
             </div>
 
             {/* Subheader & Tabs */}
-            <div className="px-6 sm:px-8 pt-5 pb-3 border-b border-slate-100 bg-white shrink-0">
-              <div className="flex items-center justify-between border-b border-slate-200 mb-4">
+            <div className="px-6 sm:px-8 pt-4 pb-3 border-b border-slate-100 bg-white shrink-0">
+              <div className="flex items-center justify-between border-b border-slate-200 mb-3.5">
                 <div className="flex items-center gap-6">
                   <button
                     type="button"
                     onClick={() => setPermsActiveTab('access')}
                     className={`pb-2.5 text-xs sm:text-sm font-extrabold cursor-pointer transition-all border-b-2 ${
                       permsActiveTab === 'access'
-                        ? 'border-[#EE3124] text-slate-900'
+                        ? 'border-[#EE3124] text-[#EE3124]'
                         : 'border-transparent text-slate-400 hover:text-slate-600'
                     }`}
                   >
-                    Access
+                    Permissions Matrix
                   </button>
                   <button
                     type="button"
                     onClick={() => setPermsActiveTab('review')}
                     className={`pb-2.5 text-xs sm:text-sm font-extrabold cursor-pointer transition-all border-b-2 ${
                       permsActiveTab === 'review'
-                        ? 'border-[#EE3124] text-slate-900'
+                        ? 'border-[#EE3124] text-[#EE3124]'
                         : 'border-transparent text-slate-400 hover:text-slate-600'
                     }`}
                   >
-                    Review
+                    Review Summary
                   </button>
                 </div>
                 <div className="text-[11px] font-mono text-slate-400 pb-2">
-                  Account: <strong className="text-slate-700 font-extrabold">{formatRole(permissionsModalUser.role)}</strong>
+                  Account Type: <strong className="text-slate-700 font-extrabold">{formatRole(permissionsModalUser.role)}</strong>
                 </div>
-              </div>
-
-              <div>
-                <h3 className="text-lg sm:text-xl font-extrabold text-slate-900">Manage user access</h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Assign a seat to give users access to features. Narrow that access with permissions.
-                </p>
               </div>
 
               {/* Accordion summary rows */}
@@ -1702,7 +1803,7 @@ export default function TeamMembersView() {
                               onClick={() => handleToggleModule('contacts')}
                               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                                 userPermsDraft.contacts?.view
-                                  ? 'bg-slate-900 text-white shadow-xs hover:bg-slate-800'
+                                  ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
                                   : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                               }`}
                             >
@@ -1811,7 +1912,7 @@ export default function TeamMembersView() {
                               onClick={() => handleToggleModule('companies')}
                               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                                 userPermsDraft.companies?.view
-                                  ? 'bg-slate-900 text-white shadow-xs hover:bg-slate-800'
+                                  ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
                                   : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                               }`}
                             >
@@ -1920,7 +2021,7 @@ export default function TeamMembersView() {
                               onClick={() => handleToggleModule('deals')}
                               className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                                 userPermsDraft.deals?.view
-                                  ? 'bg-slate-900 text-white shadow-xs hover:bg-slate-800'
+                                  ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
                                   : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                               }`}
                             >
@@ -2006,7 +2107,7 @@ export default function TeamMembersView() {
                             onClick={() => handleToggleModule('activity')}
                             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                               userPermsDraft.activity?.view
-                                ? 'bg-slate-900 text-white shadow-xs hover:bg-slate-800'
+                                ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
                                 : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                             }`}
                           >
@@ -2033,7 +2134,7 @@ export default function TeamMembersView() {
                             }}
                             className={`px-3 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                               userPermsDraft.logs?.view
-                                ? 'bg-slate-900 text-white shadow-xs hover:bg-slate-800'
+                                ? 'bg-emerald-600 text-white shadow-xs hover:bg-emerald-700'
                                 : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                             }`}
                           >

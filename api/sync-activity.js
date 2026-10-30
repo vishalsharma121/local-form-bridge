@@ -66,7 +66,7 @@ export default async function handler(req, res) {
 
         if (req.method === 'DELETE') {
             if (auth.user?.role !== 'super_admin') {
-                return res.status(403).json({ error: 'Permission denied. Only Super Admin can clear sync activity history.' });
+                return res.status(403).json({ error: 'Permission denied. Only Admins can clear sync activity history.' });
             }
             await clearSyncActivities();
             return res.status(200).json({ success: true, message: 'Sync activity history cleared' });

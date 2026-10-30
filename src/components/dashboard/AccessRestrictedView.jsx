@@ -19,7 +19,7 @@ export default function AccessRestrictedView({ title = 'Access Restricted', modu
 
       <p className="text-sm text-slate-500 font-medium leading-relaxed max-w-md mb-6">
         You do not currently have permission to access <strong className="text-slate-800">{moduleName}</strong>. 
-        Your Super Admin can configure your access rights under <strong className="text-slate-800">Team Members & Role Access</strong>.
+        Your Admin can configure your access rights under <strong className="text-slate-800">Team Members & Role Access</strong>.
       </p>
 
       {onBack && (

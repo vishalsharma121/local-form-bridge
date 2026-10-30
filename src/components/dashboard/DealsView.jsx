@@ -795,7 +795,7 @@ export default function DealsView({
   };
 
   return (
-    <div className="space-y-3.5 animate-fade-in font-sans">
+    <div className="space-y-3.5 animate-fade-in font-sans flex flex-col h-full min-h-0">
       {/* Top Controls Bar */}
       <div className="bg-white p-3.5 sm:px-5 sm:py-3 rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shrink-0">
         {/* Search */}
@@ -891,7 +891,7 @@ export default function DealsView({
       </div>
 
       {/* Deals Table */}
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col max-h-[calc(100vh-13.5rem)]">
+      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col flex-1 min-h-0">
         {loading && (
           <div className="p-12 text-center text-slate-500 space-y-3">
             <div className="w-8 h-8 border-4 border-[#EE3124] border-t-transparent rounded-full animate-spin mx-auto" />
@@ -930,7 +930,7 @@ export default function DealsView({
 
         {!loading && !error && filteredDeals.length > 0 && (
           <>
-            <div className="overflow-x-auto overflow-y-auto min-h-0">
+            <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-slate-50 z-10 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
                   <tr>
