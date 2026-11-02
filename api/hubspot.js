@@ -1,5 +1,10 @@
-import { getHubSpotToken, MISSING_TOKEN_ERROR } from '../lib/hubspot.js';
+import { getHubSpotToken } from '../lib/hubspot.js';
+import { getHubSpotOwners } from '../lib/hubspotOwners.js';
 import { authenticateRequest } from '../lib/userAuth.js';
+
+let cachedHealth = null;
+let lastCheckTime = 0;
+const CACHE_TTL_MS = 5000; // 5-second cache to prevent HubSpot API rate limits
 
 const DEFAULT_LIFECYCLE_STAGES = [
   { value: 'subscriber', label: 'Subscriber' },
@@ -69,7 +74,110 @@ const DEFAULT_DEAL_PRIORITIES = [
   { value: 'high', label: 'High' }
 ];
 
-export default async function handler(req, res) {
+async function handleHealth(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const now = Date.now();
+  if (cachedHealth && now - lastCheckTime < CACHE_TTL_MS) {
+    return res.status(200).json(cachedHealth);
+  }
+
+  try {
+    const token = getHubSpotToken();
+    if (!token) {
+      cachedHealth = {
+        connected: false,
+        status: 'UNCONFIGURED',
+        message: 'HubSpot token is not configured in environment variables (HUBSPOT_PRIVATE_APP_TOKEN).'
+      };
+      lastCheckTime = now;
+      return res.status(200).json(cachedHealth);
+    }
+
+    const response = await fetch('https://api.hubapi.com/crm/v3/objects/contacts?limit=1', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (response.ok) {
+      cachedHealth = {
+        connected: true,
+        status: 'HEALTHY',
+        message: 'HubSpot API is connected and operational.'
+      };
+    } else {
+      const errData = await response.json().catch(() => ({}));
+      let msg = errData.message;
+      if (response.status === 401 || response.status === 403) {
+        msg = `Authentication Failed (HTTP ${response.status}): Token is invalid or unauthorized.`;
+      } else if (response.status >= 500) {
+        msg = `HubSpot Outage (HTTP ${response.status}): HubSpot CRM is temporarily unavailable.`;
+      } else if (!msg) {
+        msg = `HubSpot API error (HTTP ${response.status}).`;
+      }
+
+      cachedHealth = {
+        connected: false,
+        status: response.status === 401 || response.status === 403 ? 'UNAUTHORIZED' : 'ERROR',
+        message: msg
+      };
+    }
+  } catch (err) {
+    console.error('❌ [API] HubSpot health check network error:', err);
+    cachedHealth = {
+      connected: false,
+      status: 'NETWORK_ERROR',
+      message: `Network/connection error: ${err.message || 'Failed to connect to HubSpot API'}`
+    };
+  }
+
+  lastCheckTime = now;
+  return res.status(200).json(cachedHealth);
+}
+
+async function handleOwners(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const auth = await authenticateRequest(req);
+    if (!auth.authenticated) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const rawOwners = await getHubSpotOwners();
+    let owners = (rawOwners || []).map(o => ({
+      id: String(o.id),
+      name: `${o.firstName || ''} ${o.lastName || ''}`.trim() || o.email || `Owner #${o.id}`,
+      email: o.email || o.primaryEmail || '',
+      archived: Boolean(o.archived)
+    })).filter(o => !o.archived);
+
+    if (owners.length === 0) {
+      owners = [
+        { id: '16420175', name: 'Hub Dev', email: 'info@starkedge.com' },
+        { id: '40802263', name: 'Dev Stark', email: 'dev@starkedge.com' }
+      ];
+    }
+
+    return res.status(200).json({ owners });
+  } catch (err) {
+    console.error('❌ [API] /api/hubspot?type=owners error:', err);
+    return res.status(500).json({ 
+      owners: [
+        { id: '16420175', name: 'Hub Dev', email: 'info@starkedge.com' },
+        { id: '40802263', name: 'Dev Stark', email: 'dev@starkedge.com' }
+      ]
+    });
+  }
+}
+
+async function handleProperties(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -228,7 +336,7 @@ export default async function handler(req, res) {
       isDynamic
     });
   } catch (err) {
-    console.error('🔥 [API] /api/hubspot-properties error:', err);
+    console.error('❌ [API] /api/hubspot?type=properties error:', err);
     return res.status(200).json({
       lifecycleStages: DEFAULT_LIFECYCLE_STAGES,
       leadStatuses: DEFAULT_LEAD_STATUS_OPTIONS,
@@ -240,4 +348,27 @@ export default async function handler(req, res) {
       error: err.message
     });
   }
+}
+
+export default async function handler(req, res) {
+  const type = req.query?.type || (
+    req.url.includes('health') ? 'health' :
+    req.url.includes('owners') ? 'owners' :
+    req.url.includes('properties') ? 'properties' :
+    null
+  );
+
+  if (type === 'health') {
+    return handleHealth(req, res);
+  }
+  if (type === 'owners') {
+    return handleOwners(req, res);
+  }
+  if (type === 'properties') {
+    return handleProperties(req, res);
+  }
+
+  return res.status(400).json({
+    error: 'Missing or invalid HubSpot operation. Use ?type=health, ?type=owners, or ?type=properties.'
+  });
 }

@@ -1,6 +1,42 @@
 {
   "rewrites": [
     {
+      "source": "/api/hubspot-health",
+      "destination": "/api/hubspot?type=health"
+    },
+    {
+      "source": "/api/hubspot-owners",
+      "destination": "/api/hubspot?type=owners"
+    },
+    {
+      "source": "/api/hubspot-properties",
+      "destination": "/api/hubspot?type=properties"
+    },
+    {
+      "source": "/api/sync-activity",
+      "destination": "/api/sync?view=activity"
+    },
+    {
+      "source": "/api/sync-errors/:id/retry",
+      "destination": "/api/sync?view=errors&id=:id&action=retry"
+    },
+    {
+      "source": "/api/sync-errors",
+      "destination": "/api/sync?view=errors"
+    },
+    {
+      "source": "/api/retry-sync-error",
+      "destination": "/api/sync?view=errors"
+    },
+    {
+      "source": "/api/error-logs",
+      "destination": "/api/sync?view=errors"
+    },
+    {
+      "source": "/api/cron-auto-retry",
+      "destination": "/api/sync?view=cron"
+    },
+    {
       "source": "/api/create-contact",
       "destination": "/api/contacts"
     },
@@ -11,18 +47,6 @@
     {
       "source": "/api/create-deal",
       "destination": "/api/deals"
-    },
-    {
-      "source": "/api/sync-errors/:id/retry",
-      "destination": "/api/sync-errors?id=:id"
-    },
-    {
-      "source": "/api/retry-sync-error",
-      "destination": "/api/sync-errors"
-    },
-    {
-      "source": "/api/error-logs",
-      "destination": "/api/sync-errors"
     },
     {
       "source": "/((?!api/|@vite|@react-refresh|.*\\.[a-zA-Z0-9]+$).*)",

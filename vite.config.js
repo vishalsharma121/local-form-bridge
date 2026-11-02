@@ -27,8 +27,26 @@ function vercelApiPlugin() {
         if (syncErrorRetryMatch) {
           req.params = { id: syncErrorRetryMatch[1] };
           req.query.id = syncErrorRetryMatch[1];
-          modulePath = '/api/sync-errors.js';
-          fullPath = path.resolve(process.cwd(), 'api/sync-errors.js');
+          req.query.view = 'errors';
+          req.query.action = 'retry';
+          modulePath = '/api/sync.js';
+          fullPath = path.resolve(process.cwd(), 'api/sync.js');
+        } else if (routeName === 'hubspot-health' || routeName === 'hubspot-owners' || routeName === 'hubspot-properties') {
+          req.query.type = routeName.replace('hubspot-', '');
+          modulePath = '/api/hubspot.js';
+          fullPath = path.resolve(process.cwd(), 'api/hubspot.js');
+        } else if (routeName === 'sync-activity') {
+          req.query.view = 'activity';
+          modulePath = '/api/sync.js';
+          fullPath = path.resolve(process.cwd(), 'api/sync.js');
+        } else if (routeName === 'sync-errors' || routeName === 'error-logs' || routeName === 'retry-sync-error') {
+          req.query.view = 'errors';
+          modulePath = '/api/sync.js';
+          fullPath = path.resolve(process.cwd(), 'api/sync.js');
+        } else if (routeName === 'cron-auto-retry') {
+          req.query.view = 'cron';
+          modulePath = '/api/sync.js';
+          fullPath = path.resolve(process.cwd(), 'api/sync.js');
         } else if (routeName === 'create-contact') {
           modulePath = '/api/contacts.js';
           fullPath = path.resolve(process.cwd(), 'api/contacts.js');
@@ -38,9 +56,6 @@ function vercelApiPlugin() {
         } else if (routeName === 'create-deal') {
           modulePath = '/api/deals.js';
           fullPath = path.resolve(process.cwd(), 'api/deals.js');
-        } else if (routeName === 'error-logs' || routeName === 'retry-sync-error') {
-          modulePath = '/api/sync-errors.js';
-          fullPath = path.resolve(process.cwd(), 'api/sync-errors.js');
         }
 
         if (!fs.existsSync(fullPath)) {
