@@ -26,8 +26,9 @@ async function handleSyncActivity(req, res) {
     }
 
     if (req.method === 'GET') {
+        const forceReconcile = req.query?.force === 'true' || req.query?.force === true;
         // Reconcile external activities in the background so GET returns immediately without blocking
-        reconcileExternalHubSpotActivities().catch(err => {
+        reconcileExternalHubSpotActivities(forceReconcile).catch(err => {
             console.warn('⚠️ [API] Background HubSpot reconciliation warning:', err.message);
         });
 

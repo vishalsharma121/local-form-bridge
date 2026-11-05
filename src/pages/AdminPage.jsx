@@ -215,13 +215,14 @@ function AdminDashboardContent() {
     }
   }, [getAuthHeaders]);
 
-  const loadActivityLogs = useCallback(async () => {
+  const loadActivityLogs = useCallback(async (force = false) => {
     if (!can('view', 'activity')) {
       setActivities([]);
       return null;
     }
     try {
-      const res = await fetch('/api/sync-activity', {
+      const url = force ? '/api/sync-activity?force=true' : '/api/sync-activity';
+      const res = await fetch(url, {
         headers: getAuthHeaders(),
       });
       if (res.status === 401) {
@@ -275,7 +276,7 @@ function AdminDashboardContent() {
     }
   }, [getAuthHeaders, can, loadErrorLogs, loadActivityLogs]);
 
-  const loadAllData = useCallback(async (silent = false) => {
+  const loadAllData = useCallback(async (silent = false, forceReconcile = false) => {
     if (!silent) setLoading(true);
     try {
       await Promise.allSettled([
@@ -283,7 +284,7 @@ function AdminDashboardContent() {
         loadCompanies(),
         loadDeals(),
         loadErrorLogs(),
-        loadActivityLogs()
+        loadActivityLogs(forceReconcile)
       ]);
     } catch (err) {
       console.warn('Sync load error:', err);
@@ -341,7 +342,7 @@ function AdminDashboardContent() {
 
   const handleManualRefresh = async () => {
     setSyncSuccess(false);
-    loadAllData(false);
+    loadAllData(false, true); // forceReconcile = true to immediately catch any HubSpot edits
     setCountdown(60);
     setTimeout(() => {
       setSyncSuccess(true);
