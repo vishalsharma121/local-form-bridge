@@ -34,14 +34,20 @@ async function handleSyncActivity(req, res) {
 
         let activities = await getSyncActivities();
 
-        // If user is a standard team member (not super_admin), restrict activities strictly to their own work
-        const isSuper = auth.user?.role === 'super_admin';
+        // Super Admins and Admins see all organization-wide activities and HubSpot CRM sync events
+        const isSuper = auth.user?.role === 'super_admin' || auth.user?.role === 'admin';
         if (!isSuper) {
             const uEmail = (auth.user.email || '').toLowerCase().trim();
             const uName = (auth.user.name || '').toLowerCase().trim();
             const uId = auth.user.userId || auth.user.id;
 
             activities = activities.filter((act) => {
+                // Always allow CRM-wide system events (HubSpot CRM, Webhooks) to be visible to all members
+                const isHubSpotGlobal = (act.userName && act.userName.toLowerCase().includes('hubspot')) ||
+                                        (act.userEmail && (act.userEmail.toLowerCase().includes('hubspot') || act.userEmail.toLowerCase().includes('crm@'))) ||
+                                        (act.message && (act.message.includes('[HubSpot CRM]') || act.message.includes('[HubSpot Webhook]')));
+                if (isHubSpotGlobal) return true;
+
                 if (act.userId && uId && Number(act.userId) === Number(uId)) return true;
                 if (act.userEmail && act.userEmail.toLowerCase().trim() === uEmail) return true;
                 if (act.userName && act.userName.toLowerCase().trim() === uName) return true;
