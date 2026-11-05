@@ -30,7 +30,7 @@ function AdminDashboardContent() {
 
   // Live Auto-Sync states
   const [autoSync, setAutoSync] = useState(true);
-  const [countdown, setCountdown] = useState(10);
+  const [countdown, setCountdown] = useState(60);
   const [lastSyncedAt, setLastSyncedAt] = useState(null);
   const [syncSuccess, setSyncSuccess] = useState(false);
 
@@ -302,7 +302,7 @@ function AdminDashboardContent() {
     triggerAutoRetry();
   }, [user, loadAllData, triggerAutoRetry]);
 
-  // LIVE AUTO-SYNC COUNTDOWN
+  // LIVE AUTO-SYNC COUNTDOWN (Optimized 60-second gentle polling to prevent API saturation)
   useEffect(() => {
     if (!user || !autoSync) return;
 
@@ -311,19 +311,25 @@ function AdminDashboardContent() {
         if (prev <= 1) {
           loadAllData(true);
           pollCountRef.current += 1;
-          if (pollCountRef.current % 6 === 0) {
+          if (pollCountRef.current % 3 === 0) {
             triggerAutoRetry();
           }
-          return 10;
+          return 60;
         }
         return prev - 1;
       });
     }, 1000);
 
+    let lastFocusSyncTime = Date.now();
     const handleFocus = () => {
-      loadAllData(true);
-      triggerAutoRetry();
-      setCountdown(10);
+      const now = Date.now();
+      // Only refresh on window focus if at least 45 seconds have passed
+      if (now - lastFocusSyncTime > 45000) {
+        lastFocusSyncTime = now;
+        loadAllData(true);
+        triggerAutoRetry();
+        setCountdown(60);
+      }
     };
     window.addEventListener('focus', handleFocus);
 
@@ -336,7 +342,7 @@ function AdminDashboardContent() {
   const handleManualRefresh = async () => {
     setSyncSuccess(false);
     loadAllData(false);
-    setCountdown(10);
+    setCountdown(60);
     setTimeout(() => {
       setSyncSuccess(true);
       setTimeout(() => setSyncSuccess(false), 2500);

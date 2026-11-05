@@ -6,6 +6,14 @@ let cachedHealth = null;
 let lastCheckTime = 0;
 const CACHE_TTL_MS = 5000; // 5-second cache to prevent HubSpot API rate limits
 
+let cachedOwners = null;
+let lastOwnersCheckTime = 0;
+const OWNERS_CACHE_TTL_MS = 300000; // 5-minute cache for team owners
+
+let cachedProperties = null;
+let lastPropertiesCheckTime = 0;
+const PROPERTIES_CACHE_TTL_MS = 600000; // 10-minute cache for CRM properties metadata
+
 const DEFAULT_LIFECYCLE_STAGES = [
   { value: 'subscriber', label: 'Subscriber' },
   { value: 'lead', label: 'Lead' },
@@ -144,6 +152,11 @@ async function handleOwners(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const now = Date.now();
+  if (cachedOwners && now - lastOwnersCheckTime < OWNERS_CACHE_TTL_MS) {
+    return res.status(200).json({ owners: cachedOwners, cached: true });
+  }
+
   try {
     const auth = await authenticateRequest(req);
     if (!auth.authenticated) {
@@ -165,6 +178,9 @@ async function handleOwners(req, res) {
       ];
     }
 
+    cachedOwners = owners;
+    lastOwnersCheckTime = now;
+
     return res.status(200).json({ owners });
   } catch (err) {
     console.error('❌ [API] /api/hubspot?type=owners error:', err);
@@ -180,6 +196,11 @@ async function handleOwners(req, res) {
 async function handleProperties(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const now = Date.now();
+  if (cachedProperties && now - lastPropertiesCheckTime < PROPERTIES_CACHE_TTL_MS) {
+    return res.status(200).json({ ...cachedProperties, cached: true });
   }
 
   try {
@@ -326,7 +347,7 @@ async function handleProperties(req, res) {
       }
     }
 
-    return res.status(200).json({
+    const responsePayload = {
       lifecycleStages,
       leadStatuses,
       companyIndustries,
@@ -334,7 +355,14 @@ async function handleProperties(req, res) {
       dealTypes,
       dealPriorities,
       isDynamic
-    });
+    };
+
+    if (isDynamic) {
+      cachedProperties = responsePayload;
+      lastPropertiesCheckTime = now;
+    }
+
+    return res.status(200).json(responsePayload);
   } catch (err) {
     console.error('❌ [API] /api/hubspot?type=properties error:', err);
     return res.status(200).json({
@@ -372,3 +400,4 @@ export default async function handler(req, res) {
     error: 'Missing or invalid HubSpot operation. Use ?type=health, ?type=owners, or ?type=properties.'
   });
 }
+

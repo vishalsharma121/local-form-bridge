@@ -6,6 +6,10 @@ import { authenticateRequest } from '../lib/userAuth.js';
 import { can, formatRole } from '../lib/permissions.js';
 import { getHubSpotOwnerIdByEmail, createHubSpotNote } from '../lib/hubspotOwners.js';
 
+let cachedPipelines = null;
+let lastPipelinesCheckTime = 0;
+const PIPELINES_CACHE_TTL_MS = 600000; // 10-minute cache for deal pipelines metadata
+
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
@@ -99,24 +103,33 @@ export default async function handler(req, res) {
             }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
 
             let pipelines = [];
-            try {
-                const pipeRes = await fetch('https://api.hubapi.com/crm/v3/pipelines/deals', {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (pipeRes.ok) {
-                    const pipeData = await pipeRes.json();
-                    pipelines = (pipeData.results || []).map((p) => ({
-                        id: p.id,
-                        label: p.label || p.id,
-                        stages: (p.stages || []).map((s) => ({
-                            id: s.id,
-                            label: s.label || s.id,
-                            displayOrder: s.displayOrder !== undefined ? s.displayOrder : 0
-                        })).sort((a, b) => a.displayOrder - b.displayOrder)
-                    }));
+            const now = Date.now();
+            if (cachedPipelines && (now - lastPipelinesCheckTime < PIPELINES_CACHE_TTL_MS)) {
+                pipelines = cachedPipelines;
+            } else {
+                try {
+                    const pipeRes = await fetch('https://api.hubapi.com/crm/v3/pipelines/deals', {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (pipeRes.ok) {
+                        const pipeData = await pipeRes.json();
+                        pipelines = (pipeData.results || []).map((p) => ({
+                            id: p.id,
+                            label: p.label || p.id,
+                            stages: (p.stages || []).map((s) => ({
+                                id: s.id,
+                                label: s.label || s.id,
+                                displayOrder: s.displayOrder !== undefined ? s.displayOrder : 0
+                            })).sort((a, b) => a.displayOrder - b.displayOrder)
+                        }));
+                        if (pipelines.length > 0) {
+                            cachedPipelines = pipelines;
+                            lastPipelinesCheckTime = now;
+                        }
+                    }
+                } catch (pErr) {
+                    console.warn('⚠️ [API] Failed to fetch pipelines:', pErr.message);
                 }
-            } catch (pErr) {
-                console.warn('⚠️ [API] Failed to fetch pipelines:', pErr.message);
             }
 
             // Role-based visibility: Super Admin sees all deals, Team Member only sees self-created deals

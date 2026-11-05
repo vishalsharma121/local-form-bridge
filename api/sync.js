@@ -26,9 +26,9 @@ async function handleSyncActivity(req, res) {
     }
 
     if (req.method === 'GET') {
-        // Automatically reconcile any contacts, companies, or deals created directly in HubSpot CRM
-        await reconcileExternalHubSpotActivities().catch(err => {
-            console.warn('⚠️ [API] HubSpot reconciliation warning:', err.message);
+        // Reconcile external activities in the background so GET returns immediately without blocking
+        reconcileExternalHubSpotActivities().catch(err => {
+            console.warn('⚠️ [API] Background HubSpot reconciliation warning:', err.message);
         });
 
         let activities = await getSyncActivities();
@@ -316,3 +316,4 @@ export default async function handler(req, res) {
         return res.status(500).json({ error: 'Failed to process sync request: ' + err.message });
     }
 }
+
