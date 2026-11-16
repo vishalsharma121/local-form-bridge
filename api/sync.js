@@ -35,36 +35,20 @@ async function handleSyncActivity(req, res) {
         let activities = await getSyncActivities();
 
         // Super Admins and Admins see all organization-wide activities and HubSpot CRM sync events
-        const isSuper = auth.user?.role === 'super_admin' || auth.user?.role === 'admin';
+        const isSuper = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
         if (!isSuper) {
             const uEmail = (auth.user.email || '').toLowerCase().trim();
-            const uName = (auth.user.name || '').toLowerCase().trim();
-            const uId = auth.user.userId || auth.user.id;
+            const uId = Number(auth.user.userId || auth.user.id);
 
             activities = activities.filter((act) => {
-                // Always allow CRM-wide system events (HubSpot CRM, Webhooks) to be visible to all members
-                const isHubSpotGlobal = (act.userName && act.userName.toLowerCase().includes('hubspot')) ||
-                                        (act.userEmail && (act.userEmail.toLowerCase().includes('hubspot') || act.userEmail.toLowerCase().includes('crm@'))) ||
-                                        (act.message && (act.message.includes('[HubSpot CRM]') || act.message.includes('[HubSpot Webhook]')));
-                if (isHubSpotGlobal) return true;
+                const matchUserId = act.userId && Number(act.userId) === uId;
+                const matchUserEmail = act.userEmail && act.userEmail.toLowerCase().trim() === uEmail;
+                const matchCreatorId = act.entityInfo?.createdBy?.id && Number(act.entityInfo?.createdBy?.id) === uId;
+                const matchCreatorEmail = act.entityInfo?.createdBy?.email && act.entityInfo?.createdBy?.email.toLowerCase().trim() === uEmail;
+                const matchRecordEmail = act.record_email && act.record_email.toLowerCase().trim() === uEmail;
+                const matchMsgEmail = uEmail && act.message && act.message.toLowerCase().includes(uEmail);
 
-                if (act.userId && uId && Number(act.userId) === Number(uId)) return true;
-                if (act.userEmail && act.userEmail.toLowerCase().trim() === uEmail) return true;
-                if (act.userName && act.userName.toLowerCase().trim() === uName) return true;
-
-                const creatorEmail = (act.entityInfo?.createdBy?.email || '').toLowerCase().trim();
-                const creatorName = (act.entityInfo?.createdBy?.name || '').toLowerCase().trim();
-                if (creatorEmail && creatorEmail === uEmail) return true;
-                if (creatorName && creatorName === uName) return true;
-
-                const recEmail = (act.record_email || '').toLowerCase().trim();
-                if (recEmail && recEmail === uEmail) return true;
-
-                const msg = (act.message || '').toLowerCase();
-                if (uName && (msg.includes('[' + uName + ']') || msg.includes('by ' + uName) || msg.includes(uName + ':'))) return true;
-                if (uEmail && msg.includes(uEmail)) return true;
-
-                return false;
+                return Boolean(matchUserId || matchUserEmail || matchCreatorId || matchCreatorEmail || matchRecordEmail || matchMsgEmail);
             });
         }
 

@@ -132,25 +132,20 @@ export default async function handler(req, res) {
                 }
             }
 
-            // Role-based visibility: Super Admin sees all deals, Team Member only sees self-created deals
-            const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin';
+            // Role-based visibility: Super Admin and Admin see all deals, Team Member only sees self-created deals
+            const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
             let visibleDeals = deals;
 
             if (!isSuperAdmin) {
-                const userName = (auth.user?.name || '').toLowerCase().trim();
                 const userEmail = (auth.user?.email || '').toLowerCase().trim();
                 const userId = Number(auth.user?.userId || auth.user?.id);
 
                 visibleDeals = deals.filter((d) => {
-                    const matchCreatorName = d.created_by && d.created_by.toLowerCase().trim() === userName;
-                    const matchCreatorEmail = d.created_by_email && d.created_by_email.toLowerCase().trim() === userEmail;
                     const matchCreatorId = d.created_by_user_id && Number(d.created_by_user_id) === userId;
-                    const matchDescription = d.description && (
-                        (userEmail && d.description.toLowerCase().includes(userEmail)) ||
-                        (userName && d.description.toLowerCase().includes(userName))
-                    );
+                    const matchCreatorEmail = d.created_by_email && d.created_by_email.toLowerCase().trim() === userEmail;
+                    const matchDescriptionEmail = userEmail && d.description && d.description.toLowerCase().includes(userEmail);
 
-                    return Boolean(matchCreatorName || matchCreatorEmail || matchCreatorId || matchDescription);
+                    return Boolean(matchCreatorId || matchCreatorEmail || matchDescriptionEmail);
                 });
                 console.log(`🔒 [API/Deals] Filtered deals for team member "${auth.user?.email}": ${visibleDeals.length} of ${deals.length} deals visible`);
             }
@@ -421,6 +416,19 @@ export default async function handler(req, res) {
                 return res.status(400).json({ error: 'Deal ID is required for updating.' });
             }
 
+            const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
+            if (!isSuperAdmin) {
+                const userEmail = (auth.user?.email || '').toLowerCase().trim();
+                const userId = Number(auth.user?.userId || auth.user?.id);
+                const sourcesMap = await getLeadSourcesMap();
+                const srcInfo = sourcesMap[String(dealId)];
+                const isOwner = (srcInfo?.created_by_user_id && Number(srcInfo.created_by_user_id) === userId) ||
+                                (srcInfo?.created_by_email && srcInfo.created_by_email.toLowerCase().trim() === userEmail);
+                if (!isOwner) {
+                    return res.status(403).json({ error: 'Permission denied. Team members can only update deals they created.' });
+                }
+            }
+
             const token = getHubSpotToken();
             if (!token) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
@@ -644,6 +652,19 @@ export default async function handler(req, res) {
             const dealId = req.query?.id || req.body?.id;
             if (!dealId) {
                 return res.status(400).json({ error: 'Deal ID is required for deletion.' });
+            }
+
+            const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
+            if (!isSuperAdmin) {
+                const userEmail = (auth.user?.email || '').toLowerCase().trim();
+                const userId = Number(auth.user?.userId || auth.user?.id);
+                const sourcesMap = await getLeadSourcesMap();
+                const srcInfo = sourcesMap[String(dealId)];
+                const isOwner = (srcInfo?.created_by_user_id && Number(srcInfo.created_by_user_id) === userId) ||
+                                (srcInfo?.created_by_email && srcInfo.created_by_email.toLowerCase().trim() === userEmail);
+                if (!isOwner) {
+                    return res.status(403).json({ error: 'Permission denied. Team members can only delete deals they created.' });
+                }
             }
 
             const token = getHubSpotToken();
