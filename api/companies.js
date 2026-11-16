@@ -52,17 +52,22 @@ export default async function handler(req, res) {
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
                 let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
 
-                const isPortalCreator = creator && !creator.toLowerCase().includes('hubspot') && !creator.toLowerCase().includes('public') && !creator.toLowerCase().includes('website');
-                let leadSource = srcName || c.properties.lead_source || 'HubSpot Direct';
+                const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
+                const isPortalCompany = Boolean(
+                    creatorUserId || 
+                    srcName === 'Admin Dashboard' || 
+                    srcName === 'Bridge Portal'
+                );
 
-                if (isPortalCreator || srcInfo?.created_by_user_id) {
+                let leadSource = 'HubSpot Direct';
+                if (isPortalCompany) {
                     leadSource = 'Admin Dashboard';
-                } else if (creator === 'Public Lead Form' || (leadSource || '').toLowerCase().includes('website')) {
+                } else if (creator === 'Public Lead Form' || srcName === 'Website Form' || (srcName || '').toLowerCase().includes('website')) {
                     leadSource = 'Website Form';
-                } else if ((leadSource || '').toLowerCase().includes('webhook')) {
+                } else if ((srcName || '').toLowerCase().includes('webhook') || (c.properties.lead_source || '').toLowerCase().includes('webhook')) {
                     leadSource = 'HubSpot Webhook';
-                } else if (!leadSource || leadSource === 'HubSpot CRM' || leadSource === 'HubSpot / Unknown') {
-                    leadSource = 'HubSpot Direct';
+                } else if (srcName === 'HubSpot CRM' || srcName === 'HubSpot Direct' || c.properties.lead_source) {
+                    leadSource = srcName || c.properties.lead_source || 'HubSpot Direct';
                 }
 
                 if (!creator) {

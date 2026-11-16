@@ -24,6 +24,7 @@ import {
   User,
   Mail,
   Phone,
+  Globe,
   Tag,
   DollarSign,
   Layers
@@ -677,26 +678,66 @@ export default function ActivityFeedView({
                 </div>
               </div>
 
-              {/* Triggered By User & Lead Source Attribution Card */}
+              {/* Triggered By Attribution Card */}
               {(() => {
                 const bracketName = selectedActivity.message?.match(/^\[([^\]]+)\]/)?.[1];
                 const byName = selectedActivity.message?.match(/by ([^:]+):/)?.[1];
-                const creatorName = selectedActivity.entityInfo?.createdBy?.name || bracketName || byName || selectedActivity.entityInfo?.createdBy?.email || 'Team User';
-                const rawRole = selectedActivity.entityInfo?.createdBy?.role || 'Admin';
-                const userRole = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
-                const sourceName = selectedActivity.entityInfo?.lead_source || selectedActivity.entityInfo?.source || 'Bridge Portal';
+                const creatorName = selectedActivity.userName || selectedActivity.entityInfo?.createdBy?.name || bracketName || byName || selectedActivity.entityInfo?.createdBy?.email || 'HubSpot CRM';
+                const msg = (selectedActivity.message || '').toLowerCase();
+                const nameLower = creatorName.toLowerCase();
+
+                const isHubSpot = nameLower.includes('hubspot') || msg.includes('[hubspot crm]');
+                const isWebhook = msg.includes('[hubspot webhook]');
+                const isPublicForm = nameLower.includes('public') || msg.includes('website form');
+
+                let sourceName = selectedActivity.entityInfo?.lead_source || selectedActivity.entityInfo?.source;
+                if (!sourceName) {
+                  if (isWebhook) sourceName = 'HubSpot Webhook';
+                  else if (isHubSpot) sourceName = 'HubSpot Direct';
+                  else if (isPublicForm) sourceName = 'Website Form';
+                  else sourceName = 'Bridge Portal';
+                }
+
+                let triggerTitle = 'Triggered By User';
+                let triggerBadge = 'User';
+                let badgeStyle = 'bg-purple-100 text-purple-800 border-purple-200';
+                let iconEl = <UserCheck className="w-4 h-4 text-white" />;
+                let iconBg = 'bg-purple-600';
+
+                if (isHubSpot) {
+                  triggerTitle = 'Triggered By Integration';
+                  triggerBadge = 'CRM';
+                  badgeStyle = 'bg-blue-100 text-blue-800 border-blue-200';
+                  iconEl = <Activity className="w-4 h-4 text-white" />;
+                  iconBg = 'bg-blue-600';
+                } else if (isWebhook) {
+                  triggerTitle = 'Triggered By Webhook';
+                  triggerBadge = 'Webhook';
+                  badgeStyle = 'bg-indigo-100 text-indigo-800 border-indigo-200';
+                  iconEl = <Layers className="w-4 h-4 text-white" />;
+                  iconBg = 'bg-indigo-600';
+                } else if (isPublicForm) {
+                  triggerTitle = 'Submitted By Visitor';
+                  triggerBadge = 'Public Form';
+                  badgeStyle = 'bg-sky-100 text-sky-800 border-sky-200';
+                  iconEl = <Globe className="w-4 h-4 text-white" />;
+                  iconBg = 'bg-sky-600';
+                } else {
+                  const rawRole = selectedActivity.entityInfo?.createdBy?.role || 'Admin';
+                  triggerBadge = (rawRole.toLowerCase() === 'admin' || rawRole.toLowerCase() === 'user') ? 'User' : (rawRole.toLowerCase() === 'super_admin' ? 'Admin' : (rawRole.toLowerCase() === 'viewer' ? 'Viewer' : rawRole));
+                }
 
                 return (
                   <div className="p-3.5 rounded-2xl bg-gradient-to-r from-purple-50/80 via-slate-50 to-orange-50/40 border border-purple-200/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
                     <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-black text-xs shadow-2xs shrink-0">
-                        <UserCheck className="w-4 h-4 text-white" />
+                      <div className={`w-8 h-8 rounded-xl ${iconBg} text-white flex items-center justify-center font-black text-xs shadow-2xs shrink-0`}>
+                        {iconEl}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-purple-700">Triggered By User</span>
-                          <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-100 text-purple-800 border border-purple-200 uppercase tracking-wider">
-                            {userRole}
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-700">{triggerTitle}</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold border uppercase tracking-wider ${badgeStyle}`}>
+                            {triggerBadge}
                           </span>
                         </div>
                         <div className="text-xs font-black text-slate-900 mt-0.5">{creatorName}</div>

@@ -60,17 +60,22 @@ export default async function handler(req, res) {
 
                 let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
 
-                const isPortalCreator = creator && !creator.toLowerCase().includes('hubspot') && !creator.toLowerCase().includes('public') && !creator.toLowerCase().includes('website');
-                let leadSource = srcName || d.properties.lead_source || 'HubSpot Direct';
+                const isPortalDeal = Boolean(
+                    creatorUserId || 
+                    srcName === 'Admin Dashboard' || 
+                    srcName === 'Bridge Portal' || 
+                    (description && description.toLowerCase().includes('via admin dashboard'))
+                );
 
-                if (isPortalCreator || creatorUserId) {
+                let leadSource = 'HubSpot Direct';
+                if (isPortalDeal) {
                     leadSource = 'Admin Dashboard';
-                } else if (creator === 'Public Lead Form' || (leadSource || '').toLowerCase().includes('website')) {
+                } else if (creator === 'Public Lead Form' || srcName === 'Website Form' || (srcName || '').toLowerCase().includes('website')) {
                     leadSource = 'Website Form';
-                } else if ((leadSource || '').toLowerCase().includes('webhook')) {
+                } else if ((srcName || '').toLowerCase().includes('webhook') || (d.properties.lead_source || '').toLowerCase().includes('webhook')) {
                     leadSource = 'HubSpot Webhook';
-                } else if (!leadSource || leadSource === 'HubSpot CRM' || leadSource === 'HubSpot / Unknown') {
-                    leadSource = 'HubSpot Direct';
+                } else if (srcName === 'HubSpot CRM' || srcName === 'HubSpot Direct' || d.properties.lead_source) {
+                    leadSource = srcName || d.properties.lead_source || 'HubSpot Direct';
                 }
 
                 if (!creator) {

@@ -113,25 +113,27 @@ export function getNormalizedSource(source, created_by = '') {
   const src = (source || '').toLowerCase().trim();
   const author = (created_by || '').toLowerCase().trim();
 
-  // 1. If created by an authenticated team user (not HubSpot CRM and not Public Form), or source indicates portal
-  const isTeamUser = Boolean(author && !author.includes('hubspot') && !author.includes('public') && !author.includes('website'));
-  const isPortalSource = src === 'admin dashboard' || src === 'admin' || src.includes('bridge');
-
-  if (isTeamUser || isPortalSource) {
-    return 'Bridge Portal';
+  // 1. If explicit HubSpot CRM / Direct
+  if (src.includes('hubspot direct') || src === 'hubspot crm' || src === 'crm' || src === 'hubspot' || src.includes('direct')) {
+    return 'HubSpot Direct';
   }
 
-  // 2. If public website form
-  if (src === 'website form' || src === 'website' || author.includes('public') || author.includes('website')) {
-    return 'Website Form';
-  }
-
-  // 3. If explicit HubSpot Webhook event
+  // 2. If explicit HubSpot Webhook event
   if (src.includes('webhook')) {
     return 'HubSpot Webhook';
   }
 
-  // 4. Default HubSpot CRM / HubSpot Direct
+  // 3. If public website form
+  if (src === 'website form' || src === 'website' || author.includes('public') || author.includes('website')) {
+    return 'Website Form';
+  }
+
+  // 4. If portal source
+  if (src === 'admin dashboard' || src === 'admin' || src.includes('bridge') || src.includes('portal')) {
+    return 'Bridge Portal';
+  }
+
+  // 5. Default HubSpot Direct
   return 'HubSpot Direct';
 }
 
