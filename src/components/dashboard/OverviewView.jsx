@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import OverviewSkeleton from './OverviewSkeleton';
 import { useAuth } from '../../context/AuthContext';
 import { 
   Users, 
   Building2,
   Briefcase,
-  Clock, 
   TrendingUp, 
   ShieldCheck, 
   ShieldAlert,
@@ -15,19 +14,20 @@ import {
   Download,
   ChevronRight,
   MessageSquare,
-  CheckCircle2,
-  AlertCircle,
-  Zap,
+  Activity,
   Globe,
   Layout,
+  Lock,
   Layers,
-  Lock
+  DollarSign,
+  CheckCircle2
 } from 'lucide-react';
+import { getSourceBadge } from './ContactsView';
 
-function AnimatedNumber({ value, duration = 1200 }) {
+function AnimatedNumber({ value, duration = 1000 }) {
   const [displayValue, setDisplayValue] = useState(0);
 
-  useEffect(() => {
+  useMemo(() => {
     let startTimestamp = null;
     const targetValue = typeof value === 'number' ? value : parseInt(value, 10) || 0;
 
@@ -39,7 +39,6 @@ function AnimatedNumber({ value, duration = 1200 }) {
     const step = (timestamp) => {
       if (!startTimestamp) startTimestamp = timestamp;
       const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-      // Cubic ease-out curve for fluid count animation
       const easeOut = 1 - Math.pow(1 - progress, 3);
       setDisplayValue(Math.floor(easeOut * targetValue));
 
@@ -54,652 +53,635 @@ function AnimatedNumber({ value, duration = 1200 }) {
     return () => window.cancelAnimationFrame(handle);
   }, [value, duration]);
 
-  return <span>{displayValue}</span>;
+  return <span>{displayValue.toLocaleString()}</span>;
 }
 
-export default function OverviewView({ contacts = [], companies = [], deals = [], errorLogs = [], loading, initialLoading, onNavigate, onExportCSV, onSelectContact }) {
+export default function OverviewView({ 
+  contacts = [], 
+  companies = [], 
+  deals = [], 
+  errorLogs = [], 
+  activities = [],
+  loading, 
+  initialLoading, 
+  onNavigate, 
+  onExportCSV, 
+  onSelectContact 
+}) {
   const { can } = useAuth() || {};
   const canViewContacts = can ? can('view', 'contacts') : true;
   const canViewCompanies = can ? can('view', 'companies') : true;
   const canViewDeals = can ? can('view', 'deals') : true;
   const canViewLogs = can ? can('view', 'logs') : true;
-  const canViewRetry = can ? can('view', 'retry') : true;
+  const canViewActivity = can ? can('view', 'activity') : true;
 
-  const [health, setHealth] = useState({ connected: false, loading: true, message: '' });
-
-  useEffect(() => {
-    let isMounted = true;
-    const checkHealth = async () => {
-      try {
-        const res = await fetch('/api/hubspot-health');
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted) {
-            setHealth({ connected: data.connected, loading: false, message: data.message });
-          }
-        }
-      } catch {
-        if (isMounted) {
-          setHealth({ connected: false, loading: false, message: 'Network error checking health' });
-        }
-      }
-    };
-
-    checkHealth();
-    const interval = setInterval(checkHealth, 10000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []);
+  // Active right column tab: 'contacts' | 'activities'
+  const [activeRightTab, setActiveRightTab] = useState('contacts');
 
   if (initialLoading) {
     return <OverviewSkeleton />;
   }
 
-  // Compute analytics metrics
+  // Analytics Metrics
   const totalContacts = contacts.length;
   const totalCompanies = companies.length;
   const totalDeals = deals.length;
   const totalSyncFailures = errorLogs.filter(log => !log.resolved).length;
 
-  // Calculate today's contacts
+  // Total Pipeline Dollar Value
+  const totalPipelineAmount = useMemo(() => {
+    return deals.reduce((sum, d) => {
+      const cleaned = String(d.amount || '0').replace(/[^0-9.]/g, '');
+      const num = parseFloat(cleaned);
+      return sum + (isNaN(num) || num < 0 ? 0 : num);
+    }, 0);
+  }, [deals]);
+
+  // Today's Contacts count
   const todayStr = new Date().toISOString().split('T')[0];
-  const todayContacts = contacts.filter(c => {
-    if (!c.createdate) return false;
-    const dateStr = new Date(c.createdate).toISOString().split('T')[0];
-    return dateStr === todayStr;
-  });
+  const todayContactsCount = useMemo(() => {
+    return contacts.filter(c => {
+      if (!c.createdate) return false;
+      const dateStr = new Date(c.createdate).toISOString().split('T')[0];
+      return dateStr === todayStr;
+    }).length;
+  }, [contacts, todayStr]);
 
-  // Calculate lead source distribution
-  const sourceCounts = contacts.reduce((acc, c) => {
-    const s = c.lead_source || 'HubSpot / Unknown';
-    acc[s] = (acc[s] || 0) + 1;
-    return acc;
-  }, {});
+  // Lead Source breakdown
+  const { adminCount, hsCount, webCount } = useMemo(() => {
+    let admin = 0;
+    let hs = 0;
+    let web = 0;
 
-  // Calculate subject breakdown
-  const subjectCounts = contacts.reduce((acc, c) => {
-    const s = c.subject || 'General Inquiry';
-    acc[s] = (acc[s] || 0) + 1;
-    return acc;
-  }, {});
+    for (const c of contacts) {
+      const src = (c.lead_source || '').toLowerCase();
+      if (src.includes('website') || src.includes('public')) {
+        web++;
+      } else if (src.includes('admin') || src.includes('bridge') || src.includes('portal')) {
+        admin++;
+      } else {
+        hs++;
+      }
+    }
 
-  // Recent contacts (sized to naturally balance with left analytics card)
-  const recentContacts = contacts.slice(0, 6);
+    return { adminCount: admin, hsCount: hs, webCount: web };
+  }, [contacts]);
+
+  const adminPct = totalContacts > 0 ? Math.round((adminCount / totalContacts) * 100) : 0;
+  const hsPct = totalContacts > 0 ? Math.round((hsCount / totalContacts) * 100) : 0;
+  const webPct = totalContacts > 0 ? Math.round((webCount / totalContacts) * 100) : 0;
+
+  // Pipeline Stage Distribution
+  const stageDistribution = useMemo(() => {
+    const stageMap = {};
+    for (const d of deals) {
+      const stageName = d.dealstage || 'Appointments Scheduled';
+      stageMap[stageName] = (stageMap[stageName] || 0) + 1;
+    }
+    return Object.entries(stageMap)
+      .map(([stage, count]) => ({ stage, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 4);
+  }, [deals]);
+
+  // Recent contacts (newest first, up to 6)
+  const recentContacts = useMemo(() => {
+    return [...contacts]
+      .sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0))
+      .slice(0, 6);
+  }, [contacts]);
+
+  // Recent activities (newest first, up to 6)
+  const recentActivities = useMemo(() => {
+    return [...activities]
+      .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+      .slice(0, 6);
+  }, [activities]);
 
   return (
     <div className="flex flex-col space-y-4 animate-fade-in font-sans w-full pb-6">
-      {/* KPI Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 shrink-0">
+      {/* 1. Executive Metric Cards Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4 shrink-0">
         {/* Total Contacts */}
         <div 
           onClick={() => canViewContacts && onNavigate('contacts')}
-          className={`bg-white rounded-2xl p-4 sm:p-4.5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
-            canViewContacts ? 'hover:shadow-md cursor-pointer' : 'opacity-85'
+          className={`bg-white rounded-3xl p-5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
+            canViewContacts ? 'hover:shadow-lg hover:-translate-y-0.5 cursor-pointer' : 'opacity-85'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
               Contacts Directory
             </span>
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-transform ${
+            <div className={`w-9 h-9 rounded-2xl flex items-center justify-center border transition-transform ${
               canViewContacts 
-                ? 'bg-orange-50 text-[#EE3124] border-orange-100 group-hover:scale-110' 
+                ? 'bg-orange-50 text-[#EE3124] border-orange-200/80 group-hover:scale-110 shadow-2xs' 
                 : 'bg-slate-100 text-slate-400 border-slate-200'
             }`}>
-              {canViewContacts ? <Users className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
+              {canViewContacts ? <Users className="w-4.5 h-4.5" /> : <Lock className="w-3.5 h-3.5" />}
             </div>
           </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <div className="text-2xl font-extrabold text-slate-900">
+          <div className="mt-3 flex items-baseline justify-between">
+            <div className="text-3xl font-black text-slate-900 tracking-tight">
               {!canViewContacts ? '—' : loading ? '...' : <AnimatedNumber value={totalContacts} />}
             </div>
-            {canViewContacts ? (
-              <div className="flex items-center text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                <TrendingUp className="w-2.5 h-2.5 mr-1" />
+            {canViewContacts && (
+              <div className="flex items-center text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 shadow-2xs">
+                <TrendingUp className="w-3 h-3 mr-1" />
                 Active Leads
-              </div>
-            ) : (
-              <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                Restricted
               </div>
             )}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1 font-medium">
-            {canViewContacts ? `${todayContacts.length} new contact${todayContacts.length !== 1 ? 's' : ''} today` : 'Access restricted by administrator'}
+          <p className="text-xs text-slate-500 mt-1.5 font-medium flex items-center justify-between">
+            <span>{canViewContacts ? `${todayContactsCount} new lead${todayContactsCount !== 1 ? 's' : ''} added today` : 'Restricted by admin'}</span>
+            {canViewContacts && <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#EE3124] transition-colors" />}
           </p>
         </div>
 
         {/* Total Companies */}
         <div 
           onClick={() => canViewCompanies && onNavigate('companies')}
-          className={`bg-white rounded-2xl p-4 sm:p-4.5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
-            canViewCompanies ? 'hover:shadow-md cursor-pointer' : 'opacity-85'
+          className={`bg-white rounded-3xl p-5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
+            canViewCompanies ? 'hover:shadow-lg hover:-translate-y-0.5 cursor-pointer' : 'opacity-85'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
               Companies Directory
             </span>
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-transform ${
+            <div className={`w-9 h-9 rounded-2xl flex items-center justify-center border transition-transform ${
               canViewCompanies 
-                ? 'bg-orange-50 text-[#F7941D] border-orange-100 group-hover:scale-110' 
+                ? 'bg-amber-50 text-[#F7941D] border-amber-200/80 group-hover:scale-110 shadow-2xs' 
                 : 'bg-slate-100 text-slate-400 border-slate-200'
             }`}>
-              {canViewCompanies ? <Building2 className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
+              {canViewCompanies ? <Building2 className="w-4.5 h-4.5" /> : <Lock className="w-3.5 h-3.5" />}
             </div>
           </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <div className="text-2xl font-extrabold text-slate-900">
+          <div className="mt-3 flex items-baseline justify-between">
+            <div className="text-3xl font-black text-slate-900 tracking-tight">
               {!canViewCompanies ? '—' : loading ? '...' : <AnimatedNumber value={totalCompanies} />}
             </div>
-            {canViewCompanies ? (
-              <div className="text-[11px] font-bold text-[#F7941D] bg-orange-50 px-2 py-0.5 rounded-full border border-orange-200">
-                HubSpot Orgs
-              </div>
-            ) : (
-              <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                Restricted
+            {canViewCompanies && (
+              <div className="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 shadow-2xs">
+                Organizations
               </div>
             )}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1 font-medium">
-            {canViewCompanies ? 'Associated company profiles' : 'Access restricted by administrator'}
+          <p className="text-xs text-slate-500 mt-1.5 font-medium flex items-center justify-between">
+            <span>{canViewCompanies ? 'Associated CRM company accounts' : 'Restricted by admin'}</span>
+            {canViewCompanies && <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-[#F7941D] transition-colors" />}
           </p>
         </div>
 
-        {/* Total Deals */}
+        {/* Total Deals & Pipeline Value */}
         <div 
           onClick={() => canViewDeals && onNavigate('deals')}
-          className={`bg-white rounded-2xl p-4 sm:p-4.5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
-            canViewDeals ? 'hover:shadow-md cursor-pointer' : 'opacity-85'
+          className={`bg-white rounded-3xl p-5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
+            canViewDeals ? 'hover:shadow-lg hover:-translate-y-0.5 cursor-pointer' : 'opacity-85'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
               Deals & Sales Pipeline
             </span>
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-transform ${
+            <div className={`w-9 h-9 rounded-2xl flex items-center justify-center border transition-transform ${
               canViewDeals 
-                ? 'bg-red-50 text-[#EE3124] border-red-100 group-hover:scale-110' 
+                ? 'bg-purple-50 text-purple-600 border-purple-200/80 group-hover:scale-110 shadow-2xs' 
                 : 'bg-slate-100 text-slate-400 border-slate-200'
             }`}>
-              {canViewDeals ? <Briefcase className="w-4 h-4" /> : <Lock className="w-3.5 h-3.5" />}
+              {canViewDeals ? <Briefcase className="w-4.5 h-4.5" /> : <Lock className="w-3.5 h-3.5" />}
             </div>
           </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <div className="text-2xl font-extrabold text-slate-900">
+          <div className="mt-3 flex items-baseline justify-between">
+            <div className="text-3xl font-black text-slate-900 tracking-tight">
               {!canViewDeals ? '—' : loading ? '...' : <AnimatedNumber value={totalDeals} />}
             </div>
-            {canViewDeals ? (
-              <div className="text-[11px] font-bold text-[#EE3124] bg-red-50 px-2 py-0.5 rounded-full border border-red-200">
-                Pipeline Deals
+            {canViewDeals && totalPipelineAmount > 0 ? (
+              <div className="text-xs font-extrabold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200 shadow-2xs">
+                ${totalPipelineAmount.toLocaleString()}
               </div>
             ) : (
-              <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
-                Restricted
+              <div className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
+                Pipeline Deals
               </div>
             )}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1 font-medium">
-            {canViewDeals ? 'Active sales opportunities' : 'Access restricted by administrator'}
+          <p className="text-xs text-slate-500 mt-1.5 font-medium flex items-center justify-between">
+            <span>{canViewDeals ? 'Active sales pipeline stages' : 'Restricted by admin'}</span>
+            {canViewDeals && <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-purple-600 transition-colors" />}
           </p>
         </div>
 
-        {/* Sync Failures (Error History) */}
+        {/* Sync Health & Failures */}
         <div 
           onClick={() => canViewLogs && onNavigate('error-logs')}
-          className={`bg-white rounded-2xl p-4 sm:p-4.5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
-            canViewLogs ? 'hover:shadow-md cursor-pointer' : 'opacity-85'
+          className={`bg-white rounded-3xl p-5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] transition-all group ${
+            canViewLogs ? 'hover:shadow-lg hover:-translate-y-0.5 cursor-pointer' : 'opacity-85'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              Sync Health & Errors
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">
+              Sync Health & Parity
             </span>
-            <div className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-transform ${
+            <div className={`w-9 h-9 rounded-2xl flex items-center justify-center border transition-transform ${
               !canViewLogs
                 ? 'bg-slate-100 text-slate-400 border-slate-200'
                 : totalSyncFailures > 0
-                ? 'bg-rose-50 text-rose-600 border-rose-200 group-hover:scale-110'
-                : 'bg-emerald-50 text-emerald-600 border-emerald-200 group-hover:scale-110'
+                ? 'bg-rose-50 text-rose-600 border-rose-200 group-hover:scale-110 shadow-2xs'
+                : 'bg-emerald-50 text-emerald-600 border-emerald-200 group-hover:scale-110 shadow-2xs'
             }`}>
-              {!canViewLogs ? <Lock className="w-3.5 h-3.5" /> : totalSyncFailures > 0 ? <ShieldAlert className="w-4 h-4" /> : <ShieldCheck className="w-4 h-4" />}
+              {!canViewLogs ? <Lock className="w-3.5 h-3.5" /> : totalSyncFailures > 0 ? <ShieldAlert className="w-4.5 h-4.5" /> : <ShieldCheck className="w-4.5 h-4.5" />}
             </div>
           </div>
-          <div className="mt-2.5 flex items-baseline justify-between">
-            <div className="text-2xl font-extrabold text-slate-900">
+          <div className="mt-3 flex items-baseline justify-between">
+            <div className="text-3xl font-black text-slate-900 tracking-tight">
               {!canViewLogs ? '—' : loading ? '...' : <AnimatedNumber value={totalSyncFailures} />}
             </div>
             {!canViewLogs ? (
-              <div className="flex items-center text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+              <div className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
                 Restricted
               </div>
             ) : (
-              <div className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${
+              <div className={`text-xs font-bold px-2.5 py-0.5 rounded-full border shadow-2xs flex items-center gap-1.5 ${
                 totalSyncFailures > 0 
-                  ? 'text-rose-600 bg-rose-50 border-rose-200 animate-pulse'
-                  : 'text-emerald-600 bg-emerald-50 border-emerald-200'
+                  ? 'text-rose-700 bg-rose-50 border-rose-200 animate-pulse'
+                  : 'text-emerald-700 bg-emerald-50 border-emerald-200'
               }`}>
-                {totalSyncFailures > 0 ? 'Action Needed' : 'All Systems Clear'}
+                <span className={`w-1.5 h-1.5 rounded-full ${totalSyncFailures > 0 ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                {totalSyncFailures > 0 ? 'Issues Detected' : 'All Systems Clear'}
               </div>
             )}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1 flex items-center justify-between font-medium">
-            <span>{canViewLogs ? 'Click to audit sync errors' : 'Access restricted by administrator'}</span>
-            {canViewLogs && (
-              <ArrowUpRight className={`w-3 h-3 transition-colors ${
-                totalSyncFailures > 0 ? 'group-hover:text-rose-500' : 'group-hover:text-emerald-500'
-              }`} />
-            )}
+          <p className="text-xs text-slate-500 mt-1.5 font-medium flex items-center justify-between">
+            <span>{canViewLogs ? 'HubSpot 2-Way Sync Active' : 'Restricted by admin'}</span>
+            {canViewLogs && <ArrowUpRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-600 transition-colors" />}
           </p>
         </div>
       </div>
 
-      {/* Main Section: Operations Banner, Breakdown & Stream */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 w-full items-start">
-        {/* Left Column (2 cols): Operations Banner & Subject Breakdown */}
-        <div className="lg:col-span-2 flex flex-col space-y-4">
-          {/* Quick Action Banner */}
-          <div className="bg-gradient-to-r from-orange-500/10 via-red-500/5 to-orange-500/10 bg-white rounded-2xl p-3.5 sm:px-4 sm:py-3 border border-orange-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] relative overflow-hidden shrink-0">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-              <div>
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100/80 border border-orange-200 text-[#EE3124] text-xs font-extrabold mb-1">
-                  <Sparkles className="w-3.5 h-3.5 text-[#F7941D]" />
-                  <span>StarkEdge Integration Platform</span>
-                </div>
-                <h2 className="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight">Two-Way CRM Operations Hub</h2>
-                <p className="text-xs text-slate-500 mt-0.5 max-w-md leading-snug font-medium line-clamp-2">
-                  Monitor live two-way synchronization between this portal and HubSpot CRM, review Contacts, Companies, and Deals, or trigger on-demand sync operations.
-                </p>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-                {canViewContacts && (
-                  <button
-                    onClick={() => onNavigate('contacts')}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center gap-2 border-0 cursor-pointer"
-                  >
-                    <span>View All Contacts</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                )}
-                {canViewContacts && (
-                  <button
-                    onClick={onExportCSV}
-                    disabled={totalContacts === 0}
-                    className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-2xs"
-                  >
-                    <Download className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Export CSV</span>
-                  </button>
-                )}
-                {!canViewContacts && canViewLogs && (
-                  <button
-                    onClick={() => onNavigate('error-logs')}
-                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center gap-2 border-0 cursor-pointer"
-                  >
-                    <span>Audit Sync Failures</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-                )}
-                {!canViewContacts && canViewRetry && (
-                  <button
-                    onClick={() => onNavigate('retry-queue')}
-                    className="px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                  >
-                    <span>Retry Queue</span>
-                  </button>
-                )}
-              </div>
-            </div>
+      {/* 2. Operations Banner */}
+      <div className="bg-gradient-to-r from-orange-500/10 via-amber-500/5 to-transparent bg-white rounded-3xl p-5 sm:p-6 border border-orange-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.02)] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-100/90 border border-orange-200 text-[#EE3124] text-xs font-extrabold mb-1.5 shadow-2xs">
+            <Sparkles className="w-3.5 h-3.5 text-[#F7941D]" />
+            <span>StarkEdge Integration Platform</span>
           </div>
-
-          {/* Executive Channel Distribution & Analytics Card */}
-          <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all flex flex-col space-y-4">
-            <div>
-              {/* Header */}
-              <div className="flex items-center justify-between mb-3.5 pb-2.5 border-b border-slate-100">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#EE3124]/10 via-[#F7941D]/10 to-amber-500/10 border border-[#EE3124]/20 flex items-center justify-center text-[#EE3124] shadow-2xs">
-                    <TrendingUp className="w-4.5 h-4.5" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">CRM Channel & Data Origin Breakdown</h3>
-                    <p className="text-xs text-slate-500 font-medium">Real-time breakdown of two-way sync records between Bridge & HubSpot CRM</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>2-Way Synced Channels</span>
-                </div>
-              </div>
-
-              {totalContacts === 0 ? (
-                <div className="py-12 text-center text-xs text-slate-400 font-medium bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                  No contact submissions recorded yet to visualize channel breakdown.
-                </div>
-              ) : (
-                <div className="space-y-3.5 sm:space-y-4">
-                  {/* Stacked Visual Bar with Segment Labels */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                      <span>Channel Traffic Distribution</span>
-                      <span className="text-slate-400 font-medium">{totalContacts} Total Contacts Analyzed</span>
-                    </div>
-
-                    {(() => {
-                      let adminCount = 0;
-                      let hsCount = 0;
-                      Object.entries(sourceCounts).forEach(([source, count]) => {
-                        const lower = source.toLowerCase();
-                        if (lower.includes('admin') || lower.includes('bridge') || lower.includes('website') || lower.includes('form') || lower.includes('manual')) {
-                          adminCount += count;
-                        } else {
-                          hsCount += count;
-                        }
-                      });
-
-                      const adminPct = totalContacts > 0 ? (adminCount / totalContacts) * 100 : 0;
-                      const hsPct = totalContacts > 0 ? (hsCount / totalContacts) * 100 : 0;
-
-                      return (
-                        <>
-                          <div className="h-4 w-full bg-slate-100 rounded-full overflow-hidden flex p-0.5 shadow-inner gap-0.5 border border-slate-200/60">
-                            {adminPct > 0 && (
-                              <div 
-                                style={{ width: `${adminPct}%` }}
-                                className="h-full bg-gradient-to-r from-amber-400 to-amber-500 first:rounded-l-full last:rounded-r-full transition-all duration-700 relative group cursor-pointer"
-                                title={`Bridge Portal: ${adminCount} (${Math.round(adminPct)}%)`}
-                              />
-                            )}
-                            {hsPct > 0 && (
-                              <div 
-                                style={{ width: `${hsPct}%` }}
-                                className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 first:rounded-l-full last:rounded-r-full transition-all duration-700 relative group cursor-pointer"
-                                title={`HubSpot CRM: ${hsCount} (${Math.round(hsPct)}%)`}
-                              />
-                            )}
-                          </div>
-
-                          {/* 2 Metric Cards Grid */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {[
-                              {
-                                title: 'Bridge Portal',
-                                tag: 'App Created & Synced',
-                                count: adminCount,
-                                icon: Layout,
-                                color: 'text-amber-600',
-                                bgColor: 'bg-gradient-to-b from-amber-50/90 to-amber-50/30 border-amber-200/80',
-                                pillColor: 'text-amber-800 bg-amber-100/80 border-amber-200',
-                                badgeBg: 'from-amber-400 to-amber-500',
-                                barBg: 'bg-amber-500'
-                              },
-                              {
-                                title: 'HubSpot CRM',
-                                tag: 'CRM Direct & Webhooks',
-                                count: hsCount,
-                                icon: Building2,
-                                color: 'text-blue-600',
-                                bgColor: 'bg-gradient-to-b from-blue-50/90 to-indigo-50/30 border-blue-200/80',
-                                pillColor: 'text-blue-800 bg-blue-100/80 border-blue-200',
-                                badgeBg: 'from-blue-500 to-indigo-600',
-                                barBg: 'bg-gradient-to-r from-blue-500 to-indigo-600'
-                              }
-                            ].map((channel) => {
-                              const percentage = totalContacts > 0 ? Math.round((channel.count / totalContacts) * 100) : 0;
-                              const IconComponent = channel.icon;
-
-                              return (
-                                <div 
-                                  key={channel.title}
-                                  className={`p-4 sm:p-4.5 rounded-2xl border ${channel.bgColor} transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md flex flex-col justify-between`}
-                                >
-                                  <div>
-                                    <div className="flex items-start justify-between gap-1 mb-2">
-                                      <div className="flex items-center gap-2">
-                                        <div className={`p-2 rounded-xl bg-white shadow-2xs border border-slate-100 ${channel.color}`}>
-                                          <IconComponent className="w-4.5 h-4.5" />
-                                        </div>
-                                        <span className="text-sm font-extrabold text-slate-800 line-clamp-1">{channel.title}</span>
-                                      </div>
-                                    </div>
-                                    <div className="mt-1">
-                                      <span className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border inline-block ${channel.pillColor}`}>
-                                        {channel.tag}
-                                      </span>
-                                    </div>
-                                  </div>
-
-                                  <div className="mt-4 pt-3 border-t border-slate-200/40">
-                                    <div className="flex items-end justify-between">
-                                      <div>
-                                        <div className="text-3xl font-black text-slate-900 leading-none">
-                                          <AnimatedNumber value={channel.count} />
-                                        </div>
-                                        <div className="text-xs font-semibold text-slate-400 mt-1">
-                                          {channel.count === 1 ? 'Total contact' : 'Total contacts'}
-                                        </div>
-                                      </div>
-                                      <div className="text-right">
-                                        <span className={`text-xs font-black px-2.5 py-1 rounded-lg text-white bg-gradient-to-r ${channel.badgeBg} shadow-2xs`}>
-                                          <AnimatedNumber value={percentage} />%
-                                        </span>
-                                      </div>
-                                    </div>
-                                    {/* Individual Micro Progress Bar */}
-                                    <div className="w-full h-2 bg-slate-200/60 rounded-full overflow-hidden mt-3">
-                                      <div 
-                                        className={`h-full ${channel.barBg} rounded-full transition-all duration-500`}
-                                        style={{ width: `${percentage}%` }}
-                                      />
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {/* Sync Engine Capability Highlights */}
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                            <div className="p-3.5 rounded-2xl bg-slate-50/90 border border-slate-200/80 flex items-center gap-3 shadow-2xs">
-                              <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200/60 shrink-0 shadow-2xs">
-                                <Zap className="w-4.5 h-4.5" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-black text-slate-900">10s Velocity Sync</div>
-                                <div className="text-[11px] text-slate-500 font-medium truncate">Background Polling Active</div>
-                              </div>
-                            </div>
-
-                            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50/90 border border-slate-200/80 flex items-center gap-2.5 shadow-2xs">
-                              <div className="w-8 h-8 rounded-lg bg-orange-50 text-[#EE3124] flex items-center justify-center border border-orange-200/60 shrink-0 shadow-2xs">
-                                <ShieldCheck className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-black text-slate-900">Deduplication</div>
-                                <div className="text-[11px] text-slate-500 font-medium truncate">Conflict-free lead handling</div>
-                              </div>
-                            </div>
-
-                            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-50/90 border border-slate-200/80 flex items-center gap-2.5 shadow-2xs">
-                              <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center border border-blue-200/60 shrink-0 shadow-2xs">
-                                <Globe className="w-4 h-4" />
-                              </div>
-                              <div className="min-w-0">
-                                <div className="text-xs font-black text-slate-900">Bidirectional Parity</div>
-                                <div className="text-[11px] text-slate-500 font-medium truncate">App ↔ HubSpot CRM v3</div>
-                              </div>
-                            </div>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Executive Intelligence Summary Footer */}
-            <div className="mt-3 pt-2.5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs bg-slate-50/80 p-2.5 sm:px-3 rounded-xl border border-slate-200/70">
-              <div className="flex items-center gap-2 text-slate-600 font-medium">
-                <Zap className="w-4 h-4 text-emerald-500 shrink-0" />
-                {(() => {
-                  let adminCount = 0;
-                  let hsCount = 0;
-                  Object.entries(sourceCounts).forEach(([source, count]) => {
-                    const lower = source.toLowerCase();
-                    if (lower.includes('admin') || lower.includes('bridge') || lower.includes('website') || lower.includes('form') || lower.includes('manual')) {
-                      adminCount += count;
-                    } else {
-                      hsCount += count;
-                    }
-                  });
-                  const primarySource = adminCount >= hsCount ? 'Bridge Portal' : 'HubSpot CRM';
-                  const primaryPct = totalContacts > 0 ? Math.round((Math.max(adminCount, hsCount) / totalContacts) * 100) : 0;
-                  return (
-                    <span className="text-xs">
-                      Primary data origin: <strong className="text-slate-900 font-extrabold">{primarySource} ({primaryPct}%)</strong>
-                    </span>
-                  );
-                })()}
-              </div>
-              {canViewContacts && (
-                <button
-                  onClick={() => onNavigate('contacts')}
-                  className="text-xs font-extrabold text-[#EE3124] hover:text-[#d82417] flex items-center gap-1 hover:underline cursor-pointer shrink-0"
-                >
-                  <span>Filter Directory by Origin</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
+          <h2 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+            Two-Way CRM Operations Hub
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5 max-w-xl font-medium leading-relaxed">
+            Live synchronization bridge connecting this portal and HubSpot CRM. Manage contacts, company associations, deals, and automated audit streams in real time.
+          </p>
         </div>
 
-        {/* Right Column (1 col): Recent Submissions Feed */}
-        <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] hover:shadow-[0_8px_30px_rgba(0,0,0,0.06)] transition-all flex flex-col justify-between space-y-4">
-          <div className="flex flex-col">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-3 pb-2.5 border-b border-slate-100 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-[#EE3124]/10 to-[#F7941D]/10 border border-[#EE3124]/20 flex items-center justify-center text-[#EE3124] shadow-2xs">
-                  <Users className="w-4 h-4" />
+        <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-end sm:self-auto">
+          {canViewContacts && (
+            <button
+              onClick={() => onNavigate('contacts')}
+              className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center gap-2 cursor-pointer"
+            >
+              <span>Manage Contacts</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
+
+          {canViewContacts && (
+            <button
+              onClick={onExportCSV}
+              disabled={totalContacts === 0}
+              className="px-3.5 py-2.5 rounded-2xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition-colors flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-2xs"
+            >
+              <Download className="w-3.5 h-3.5 text-slate-500" />
+              <span>Export CSV</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 3. Main Dashboard Section (2 Columns) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5 w-full items-start">
+        {/* Left Column (2 cols): Visual Data Breakdown */}
+        <div className="lg:col-span-2 flex flex-col space-y-4">
+          {/* CRM Channel Breakdown Card */}
+          <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] space-y-4">
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-[#EE3124]/10 via-[#F7941D]/10 to-amber-500/10 border border-[#EE3124]/20 flex items-center justify-center text-[#EE3124] shadow-2xs">
+                  <TrendingUp className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">Recent Contacts</h3>
-                  <p className="text-xs text-slate-500 font-medium">Latest synchronized CRM contacts</p>
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
+                    CRM Lead Ingestion & Channel Breakdown
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Attribution split across portal submissions, HubSpot CRM sync, and public forms
+                  </p>
                 </div>
               </div>
-              {canViewContacts && (
-                <button
-                  onClick={() => onNavigate('contacts')}
-                  className="text-xs font-extrabold text-[#EE3124] hover:text-[#d82417] flex items-center gap-0.5 hover:underline cursor-pointer"
-                >
-                  <span>View all</span>
-                  <ChevronRight className="w-3.5 h-3.5" />
-                </button>
-              )}
+
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 text-xs font-bold shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>Live Data Sync</span>
+              </div>
             </div>
 
-            {!canViewContacts ? (
-              <div className="py-8 px-4 text-center text-xs text-slate-400 space-y-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center flex-1">
-                <Lock className="w-7 h-7 text-slate-300 mx-auto mb-1" />
-                <p className="font-semibold text-slate-700">Contacts Access Restricted</p>
-                <p className="text-xs text-slate-400 max-w-[200px]">You do not have permission to view contact leads.</p>
-              </div>
-            ) : loading ? (
-              <div className="space-y-2.5 py-2 flex-1">
-                {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-                  <div key={n} className="h-12 bg-slate-100 rounded-xl animate-pulse" />
-                ))}
-              </div>
-            ) : recentContacts.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400 space-y-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 flex-1 flex flex-col items-center justify-center">
-                <MessageSquare className="w-8 h-8 text-slate-300 mx-auto" />
-                <p className="font-semibold">No contacts logged yet.</p>
-                <button
-                  onClick={() => onNavigate('contacts')}
-                  className="px-3 py-1.5 rounded-xl bg-orange-50 text-[#EE3124] border border-orange-200 text-xs font-bold hover:bg-orange-100 cursor-pointer"
-                >
-                  Add New Contact
-                </button>
+            {totalContacts === 0 ? (
+              <div className="py-12 text-center text-xs text-slate-400 font-medium bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                No contacts synchronized yet.
               </div>
             ) : (
-              <div className="space-y-2 py-1">
-                {recentContacts.map((c) => {
-                  const source = c.lead_source || 'HubSpot / Unknown';
-                  const initials = c.name 
-                    ? c.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() 
-                    : 'CD';
-                  
-                  // Source themes
-                  const isAdmin = source === 'Admin Dashboard' || source.toLowerCase().includes('admin') || source.toLowerCase().includes('bridge');
-                  const isWebhook = source.toLowerCase().includes('webhook');
-                  
-                  const avatarBg = isAdmin 
-                    ? 'from-amber-400 to-amber-500' 
-                    : isWebhook 
-                    ? 'from-emerald-500 to-teal-600'
-                    : 'from-blue-500 to-indigo-600';
+              <div className="space-y-4">
+                {/* Visual Distribution Bar */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                    <span>Channel Traffic Share</span>
+                    <span className="text-slate-400 font-medium">{totalContacts} Total Contacts Analyzed</span>
+                  </div>
 
-                  const badgeStyle = isAdmin 
-                    ? 'text-amber-800 bg-amber-50 border-amber-200' 
-                    : isWebhook 
-                    ? 'text-emerald-700 bg-emerald-50 border-emerald-200'
-                    : 'text-blue-700 bg-blue-50 border-blue-200';
+                  <div className="h-3.5 w-full bg-slate-100 rounded-full overflow-hidden flex p-0.5 shadow-inner gap-1 border border-slate-200/70">
+                    {adminPct > 0 && (
+                      <div 
+                        style={{ width: `${adminPct}%` }}
+                        className="h-full bg-gradient-to-r from-amber-400 to-[#F7941D] rounded-full transition-all duration-700"
+                        title={`Bridge Portal: ${adminCount} (${adminPct}%)`}
+                      />
+                    )}
+                    {hsPct > 0 && (
+                      <div 
+                        style={{ width: `${hsPct}%` }}
+                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-600 rounded-full transition-all duration-700"
+                        title={`HubSpot CRM: ${hsCount} (${hsPct}%)`}
+                      />
+                    )}
+                    {webPct > 0 && (
+                      <div 
+                        style={{ width: `${webPct}%` }}
+                        className="h-full bg-gradient-to-r from-emerald-500 to-teal-600 rounded-full transition-all duration-700"
+                        title={`Website Forms: ${webCount} (${webPct}%)`}
+                      />
+                    )}
+                  </div>
+                </div>
 
-                  const badgeLabel = isAdmin ? 'Bridge' : isWebhook ? 'Webhook' : 'HubSpot';
-
-                  return (
-                    <div
-                      key={c.id}
-                      onClick={() => onSelectContact(c)}
-                      className="py-2.5 px-3 rounded-xl border border-slate-200/80 bg-slate-50/70 hover:bg-white hover:border-orange-200 hover:shadow-md hover:translate-x-1 transition-all duration-300 cursor-pointer group flex items-center justify-between gap-3"
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        {/* Avatar */}
-                        <div className={`w-9 h-9 rounded-xl bg-gradient-to-tr ${avatarBg} text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform`}>
-                          {initials}
+                {/* 2 Channel Highlight Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Bridge Portal Card */}
+                  <div className="p-4 sm:p-5 rounded-3xl border border-amber-200/80 bg-gradient-to-br from-amber-50/80 via-white to-amber-50/30 shadow-2xs flex flex-col justify-between space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2.5 rounded-2xl bg-white border border-amber-200/80 text-amber-600 shadow-2xs">
+                          <Layout className="w-4.5 h-4.5" />
                         </div>
-
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-[#EE3124] transition-colors truncate">
-                              {c.name || 'Unnamed Contact'}
-                            </span>
-                          </div>
-
-                          <div className="text-xs text-slate-500 flex items-center gap-1 truncate font-medium mt-0.5">
-                            <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span className="truncate">{c.email || 'No email provided'}</span>
-                          </div>
+                        <div>
+                          <div className="text-sm font-extrabold text-slate-900">Bridge Portal</div>
+                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200 inline-block mt-0.5">
+                            Portal Created & Synced
+                          </span>
                         </div>
                       </div>
-
-                      <div className="flex flex-col items-end shrink-0 gap-1">
-                        <span className="text-[11px] font-bold text-slate-400">
-                          {c.createdate ? new Date(c.createdate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric', year: '2-digit' }) : 'Recent'}
-                        </span>
-                        <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md border ${badgeStyle}`}>
-                          {badgeLabel}
-                        </span>
-                      </div>
+                      <span className="text-xs font-black px-2.5 py-1 rounded-xl text-white bg-gradient-to-r from-amber-400 to-[#F7941D] shadow-2xs">
+                        {adminPct}%
+                      </span>
                     </div>
-                  );
-                })}
+
+                    <div className="pt-2 border-t border-amber-200/50 flex items-baseline justify-between">
+                      <div>
+                        <div className="text-2xl font-black text-slate-900 leading-none">
+                          <AnimatedNumber value={adminCount} />
+                        </div>
+                        <span className="text-xs text-slate-500 font-semibold mt-0.5 block">
+                          Total portal contacts
+                        </span>
+                      </div>
+                      <span className="text-xs font-extrabold text-amber-700 hover:underline cursor-pointer" onClick={() => onNavigate('contacts')}>
+                        View leads →
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* HubSpot CRM Card */}
+                  <div className="p-4 sm:p-5 rounded-3xl border border-blue-200/80 bg-gradient-to-br from-blue-50/80 via-white to-indigo-50/30 shadow-2xs flex flex-col justify-between space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2.5 rounded-2xl bg-white border border-blue-200/80 text-blue-600 shadow-2xs">
+                          <Building2 className="w-4.5 h-4.5" />
+                        </div>
+                        <div>
+                          <div className="text-sm font-extrabold text-slate-900">HubSpot Direct</div>
+                          <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200 inline-block mt-0.5">
+                            CRM & Webhooks
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-xs font-black px-2.5 py-1 rounded-xl text-white bg-gradient-to-r from-blue-500 to-indigo-600 shadow-2xs">
+                        {hsPct}%
+                      </span>
+                    </div>
+
+                    <div className="pt-2 border-t border-blue-200/50 flex items-baseline justify-between">
+                      <div>
+                        <div className="text-2xl font-black text-slate-900 leading-none">
+                          <AnimatedNumber value={hsCount} />
+                        </div>
+                        <span className="text-xs text-slate-500 font-semibold mt-0.5 block">
+                          Total HubSpot CRM leads
+                        </span>
+                      </div>
+                      <span className="text-xs font-extrabold text-blue-700 hover:underline cursor-pointer" onClick={() => onNavigate('contacts')}>
+                        View leads →
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Deals Pipeline Stages Card */}
+          {canViewDeals && deals.length > 0 && (
+            <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] space-y-4">
+              <div className="flex items-center justify-between pb-3.5 border-b border-slate-100">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-purple-50 text-purple-600 border border-purple-200/80 flex items-center justify-center shrink-0 shadow-2xs">
+                    <Briefcase className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-extrabold text-slate-900 tracking-tight">
+                      Active Sales Deals & Pipeline Stages
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium">
+                      Overview of current deals tracked in the HubSpot sales pipeline
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => onNavigate('deals')}
+                  className="text-xs font-extrabold text-purple-700 hover:text-purple-900 flex items-center gap-1 hover:underline cursor-pointer"
+                >
+                  <span>Open Pipeline</span>
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {stageDistribution.map(({ stage, count }) => (
+                  <div key={stage} className="p-3.5 rounded-2xl bg-slate-50/90 border border-slate-200/70 space-y-1">
+                    <div className="text-[11px] font-bold text-slate-400 capitalize truncate" title={stage}>
+                      {stage.replace(/([A-Z])/g, ' $1').trim()}
+                    </div>
+                    <div className="text-xl font-black text-slate-900">
+                      {count} {count === 1 ? 'deal' : 'deals'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column (1 col): Recent Contacts / Live Activity Stream */}
+        <div className="bg-white rounded-3xl p-5 border border-slate-200/80 shadow-[0_4px_24px_rgba(0,0,0,0.03)] flex flex-col justify-between space-y-4">
+          <div className="flex flex-col">
+            {/* Header Tabs */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-2xl border border-slate-200/80">
+                <button
+                  type="button"
+                  onClick={() => setActiveRightTab('contacts')}
+                  className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    activeRightTab === 'contacts'
+                      ? 'bg-white text-slate-900 shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  Recent Contacts
+                </button>
+                {canViewActivity && activities.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveRightTab('activities')}
+                    className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      activeRightTab === 'activities'
+                        ? 'bg-white text-slate-900 shadow-2xs'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    Activity Feed
+                  </button>
+                )}
+              </div>
+
+              <button
+                onClick={() => onNavigate(activeRightTab === 'contacts' ? 'contacts' : 'activity')}
+                className="text-xs font-extrabold text-[#EE3124] hover:text-[#d82417] flex items-center gap-0.5 hover:underline cursor-pointer"
+              >
+                <span>View all</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* TAB CONTENT: Recent Contacts */}
+            {activeRightTab === 'contacts' && (
+              <div className="mt-3">
+                {!canViewContacts ? (
+                  <div className="py-12 text-center text-xs text-slate-400 space-y-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                    <Lock className="w-7 h-7 text-slate-300 mx-auto" />
+                    <p className="font-semibold text-slate-700">Access Restricted</p>
+                  </div>
+                ) : loading ? (
+                  <div className="space-y-2.5 py-2">
+                    {[1, 2, 3, 4, 5].map((n) => (
+                      <div key={n} className="h-12 bg-slate-100 rounded-2xl animate-pulse" />
+                    ))}
+                  </div>
+                ) : recentContacts.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-400 space-y-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                    <MessageSquare className="w-8 h-8 text-slate-300 mx-auto" />
+                    <p className="font-semibold">No contacts found</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {recentContacts.map((c) => {
+                      const initials = c.name 
+                        ? c.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() 
+                        : 'LD';
+
+                      return (
+                        <div
+                          key={c.id}
+                          onClick={() => onSelectContact && onSelectContact(c)}
+                          className="py-2.5 px-3 rounded-2xl border border-slate-200/80 bg-slate-50/60 hover:bg-white hover:border-orange-200 hover:shadow-md hover:translate-x-1 transition-all duration-300 cursor-pointer group flex items-center justify-between gap-3"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#F7941D] to-[#EE3124] text-white font-black text-xs flex items-center justify-center shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                              {initials}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="font-extrabold text-xs sm:text-sm text-slate-900 group-hover:text-[#EE3124] transition-colors truncate">
+                                {c.name || 'Unnamed Lead'}
+                              </div>
+                              <div className="text-xs text-slate-500 flex items-center gap-1 truncate font-medium mt-0.5">
+                                <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                                <span className="truncate">{c.email || 'No email'}</span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end shrink-0 gap-1">
+                            <span className="text-[10px] font-bold text-slate-400">
+                              {c.createdate ? new Date(c.createdate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }) : 'Recent'}
+                            </span>
+                            {getSourceBadge(c.lead_source, c.created_by)}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* TAB CONTENT: Activity Stream */}
+            {activeRightTab === 'activities' && (
+              <div className="mt-3">
+                {recentActivities.length === 0 ? (
+                  <div className="py-10 text-center text-xs text-slate-400 space-y-2 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                    <Activity className="w-8 h-8 text-slate-300 mx-auto" />
+                    <p className="font-semibold">No sync activities recorded</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {recentActivities.map((act) => (
+                      <div
+                        key={act.id}
+                        className="py-2.5 px-3 rounded-2xl border border-slate-200/80 bg-slate-50/60 hover:bg-white transition-all text-xs flex items-start gap-2.5"
+                      >
+                        <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-200/80 flex items-center justify-center shrink-0 mt-0.5 shadow-2xs">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-slate-900 truncate">
+                            {act.message || 'Sync operation'}
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-medium mt-0.5">
+                            {new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
 
           {canViewContacts && (
             <button
-              onClick={() => onNavigate('contacts')}
-              className="w-full mt-3 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition-all shadow-md shadow-slate-900/10 hover:shadow-slate-900/20 flex items-center justify-center gap-2 cursor-pointer border-0 shrink-0"
+              onClick={() => onNavigate(activeRightTab === 'contacts' ? 'contacts' : 'activity')}
+              className="w-full mt-3 py-2.5 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-extrabold transition-all shadow-md shadow-slate-900/10 hover:shadow-slate-900/20 flex items-center justify-center gap-2 cursor-pointer border-0 shrink-0"
             >
-              <span>Open Full Directory Manager</span>
+              <span>{activeRightTab === 'contacts' ? 'Open Contacts Directory' : 'Open Activity Stream'}</span>
               <ArrowUpRight className="w-4 h-4 text-[#F7941D]" />
             </button>
           )}
@@ -708,5 +690,3 @@ export default function OverviewView({ contacts = [], companies = [], deals = []
     </div>
   );
 }
-
-

@@ -451,6 +451,7 @@ function AdminDashboardContent() {
               companies={filteredCompanies}
               deals={filteredDeals}
               errorLogs={filteredErrorLogs}
+              activities={filteredActivities}
               loading={loading}
               initialLoading={initialLoading}
               error={error}

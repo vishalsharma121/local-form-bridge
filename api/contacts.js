@@ -118,7 +118,7 @@ export default async function handler(req, res) {
                     created_by: creator,
                     createdate: c.properties.createdate,
                 };
-            });
+            }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
 
             return res.status(200).json({ contacts });
         } catch (err) {
