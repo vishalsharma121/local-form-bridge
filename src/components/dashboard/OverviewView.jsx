@@ -191,7 +191,7 @@ export default function OverviewView({
   }
 
   return (
-    <div className="flex flex-col space-y-4 animate-fade-in font-sans w-full pb-8">
+    <div className="flex flex-col space-y-4 animate-fade-in font-sans w-full pb-0">
 
       {/* 1. Executive Operations Bar (Streamlined & Compact) */}
       <div className="bg-white rounded-2xl sm:rounded-3xl p-4 sm:p-4.5 border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] flex flex-col md:flex-row items-start md:items-center justify-between gap-3.5">
