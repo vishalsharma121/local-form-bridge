@@ -104,10 +104,6 @@ export default function OverviewView({
   // Active right column tab: 'contacts' | 'activities'
   const [activeRightTab, setActiveRightTab] = useState('contacts');
 
-  if (initialLoading) {
-    return <OverviewSkeleton />;
-  }
-
   // Analytics Metrics
   const totalContacts = contacts.length;
   const totalCompanies = companies.length;
@@ -189,6 +185,10 @@ export default function OverviewView({
       .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
       .slice(0, 6);
   }, [activities]);
+
+  if (initialLoading) {
+    return <OverviewSkeleton />;
+  }
 
   return (
     <div className="flex flex-col space-y-4 animate-fade-in font-sans w-full pb-8">
