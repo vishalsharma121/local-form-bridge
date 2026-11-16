@@ -2,7 +2,6 @@ import {
     authenticateRequest, 
     createUser, 
     listUsers, 
-    updateUserRole, 
     setUserActive, 
     updateUserDetails, 
     updateUserPassword, 
@@ -145,6 +144,7 @@ export default async function handler(req, res) {
             const users = await listUsers();
             return res.status(200).json({ 
                 success: true, 
+                updated: Boolean(updated),
                 users, 
                 updatedSelf: isEditingSelf,
                 updatedUser: updatedUserObj,

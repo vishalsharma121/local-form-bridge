@@ -464,7 +464,7 @@ export default async function handler(req, res) {
                 } catch (cErr) {
                     console.warn(`⚠️ [API] Failed associating selected Company:`, cErr.message);
                 }
-            } else if (Boolean(finalCompanyName || finalCompanyDomain)) {
+            } else if (finalCompanyName || finalCompanyDomain) {
                 if (!finalCompanyName) {
                     const emailParts = cleanEmail.split('@');
                     if (emailParts.length === 2) {
@@ -642,7 +642,7 @@ export default async function handler(req, res) {
                 } catch (dErr) {
                     console.warn(`⚠️ [API] Failed associating selected Deal:`, dErr.message);
                 }
-            } else if (Boolean(finalDealName)) {
+            } else if (finalDealName) {
                 const VALID_DEAL_STAGES = [
                     'appointmentscheduled',
                     'qualifiedtobuy',

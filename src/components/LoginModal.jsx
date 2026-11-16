@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import StarkEdgeLogo from './StarkEdgeLogo';
-import { Lock, Mail, AlertCircle, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import { Mail, AlertCircle, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
 
 export default function LoginModal() {
   const { login, authError } = useAuth();

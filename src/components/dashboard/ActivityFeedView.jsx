@@ -24,7 +24,6 @@ import {
   User,
   Mail,
   Phone,
-  Globe,
   Tag,
   DollarSign,
   Layers

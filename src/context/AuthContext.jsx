@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { can as checkCan } from '../../lib/permissions';
 
 const AuthContext = createContext(null);
@@ -8,6 +8,14 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem('app_auth_token'));
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState('');
+
+  const logout = useCallback((reason = 'user_action', message = '') => {
+    console.log(`🚪 [AuthContext] logout() called! Reason: ${reason}`);
+    localStorage.removeItem('app_auth_token');
+    setToken(null);
+    setUser(null);
+    setAuthError(message || '');
+  }, []);
 
   // Verify token on mount if token exists
   useEffect(() => {
@@ -198,15 +206,7 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const logout = (reason = 'user_action', message = '') => {
-    console.log(`🚪 [AuthContext] logout() called! Reason: ${reason}`);
-    localStorage.removeItem('app_auth_token');
-    setToken(null);
-    setUser(null);
-    setAuthError(message || '');
-  };
-
-  const getAuthHeaders = React.useCallback(() => {
+  const getAuthHeaders = useCallback(() => {
     const headers = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;

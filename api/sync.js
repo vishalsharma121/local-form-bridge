@@ -196,7 +196,7 @@ async function handleCronAutoRetry(req, res) {
         return res.status(200).json({
             success: true,
             skipped: true,
-            reason: `Throttled: Last auto-retry ran ${Math.round(elapsed / 1000)}s ago`,
+            reason: `Throttled: Last auto-retry ran ${Math.round(elapsed / 1000)}s ago (wait ${remainingSec}s)`,
             processed: 0
         });
     }

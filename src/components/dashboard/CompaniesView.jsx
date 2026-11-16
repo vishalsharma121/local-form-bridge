@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { getSourceBadge, getCreatorBadge, getNormalizedSource } from './ContactsView';
 import { 
@@ -14,13 +14,9 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
-  Filter,
   Edit3,
   Trash2,
   AlertTriangle,
-  User,
-  Briefcase,
-  Layers,
   MapPin,
   Clock,
   DollarSign,

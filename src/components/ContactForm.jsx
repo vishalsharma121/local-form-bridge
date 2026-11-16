@@ -22,8 +22,7 @@ export default function ContactForm() {
   const [submissionResult, setSubmissionResult] = useState(null);
 
   // Debug state
-  const [debugMode, setDebugMode] = useState(false);
-  const [debugLogs, setDebugLogs] = useState([]);
+  const [debugMode] = useState(false);
 
   const subjectOptions = [
     { value: '', label: 'Select a subject...' },
@@ -41,14 +40,6 @@ export default function ContactForm() {
 
   const addDebugLog = (message, data = null) => {
     const time = new Date().toLocaleTimeString();
-
-    const log = {
-      time,
-      message,
-      data,
-    };
-
-    setDebugLogs((prev) => [...prev, log]);
 
     // Browser Console
     if (data !== null) {
@@ -354,29 +345,6 @@ export default function ContactForm() {
     setIsSubmitted(false);
 
     addDebugLog('🔄 Form reset');
-  };
-
-  // --------------------------------------------------
-  // DEBUG TOGGLE
-  // --------------------------------------------------
-
-  const toggleDebugMode = () => {
-    setDebugMode((prev) => {
-      const newValue = !prev;
-
-      if (!newValue) {
-        setDebugLogs([]);
-      }
-
-      console.clear();
-
-      console.log(
-        `🐞 Contact Form Debug Mode: ${newValue ? 'ON' : 'OFF'
-        }`
-      );
-
-      return newValue;
-    });
   };
 
   // --------------------------------------------------

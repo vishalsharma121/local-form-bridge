@@ -1,4 +1,3 @@
-import React from 'react';
 import { Lock, ShieldAlert, ArrowLeft } from 'lucide-react';
 
 export default function AccessRestrictedView({ title = 'Access Restricted', moduleName = 'this module', onBack }) {
