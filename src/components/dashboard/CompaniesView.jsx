@@ -617,7 +617,12 @@ export default function CompaniesView({
                   <span className="font-bold text-slate-800">
                     {Math.min(currentPage * pageSize, filteredCompanies.length).toLocaleString()}
                   </span>{' '}
-                  of <span className="font-bold text-slate-800">{filteredCompanies.length.toLocaleString()}</span> entries
+                  of <span className="font-bold text-slate-800">{filteredCompanies.length.toLocaleString()}</span>{' '}
+                  {filteredCompanies.length !== companies.length ? (
+                    <span>filtered companies <span className="text-slate-400 font-medium">({companies.length.toLocaleString()} total in CRM)</span></span>
+                  ) : (
+                    <span>companies</span>
+                  )}
                 </div>
                 <span className="text-slate-300">|</span>
                 <div className="flex items-center gap-1.5">

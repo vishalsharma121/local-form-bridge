@@ -478,6 +478,7 @@ function AdminDashboardContent() {
               <ContactsView
                 contacts={filteredContacts}
                 allContacts={contacts}
+                totalContactsCount={totalContactsCount}
                 companies={companies}
                 deals={deals}
                 pipelines={pipelines}

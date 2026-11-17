@@ -16,7 +16,7 @@ function invalidateCompaniesCache() {
 }
 
 /**
- * Concurrently fetches all companies from HubSpot using Search API pagination in parallel batches.
+ * Concurrently fetches all companies from HubSpot using Search API pagination with automatic retry and rate-limit handling.
  */
 async function fetchAllCompaniesFromHubSpot(token) {
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -26,22 +26,42 @@ async function fetchAllCompaniesFromHubSpot(token) {
         'description', 'linkedin_company_page', 'lead_source', 'createdate'
     ];
 
-    const initialRes = await fetch('https://api.hubapi.com/crm/v3/objects/companies/search', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-            limit: 100,
-            after: 0,
-            sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
-            properties
-        })
-    });
+    async function fetchPageWithRetry(offset, retries = 2) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const res = await fetch('https://api.hubapi.com/crm/v3/objects/companies/search', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        limit: 100,
+                        after: offset,
+                        sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+                        properties
+                    })
+                });
 
-    const initialData = await initialRes.json();
-    if (!initialRes.ok) {
-        throw new Error(initialData.message || `HubSpot API error ${initialRes.status}`);
+                if (res.status === 429) {
+                    console.warn(`⏳ [API/Companies] Rate limited at offset ${offset}, backing off 400ms...`);
+                    await new Promise(r => setTimeout(r, 400));
+                    continue;
+                }
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    console.warn(`⚠️ [API/Companies] Offset ${offset} failed (HTTP ${res.status}):`, errData.message);
+                    return { results: [], total: 0 };
+                }
+
+                return await res.json();
+            } catch (err) {
+                if (attempt === retries) return { results: [], total: 0 };
+                await new Promise(r => setTimeout(r, 250));
+            }
+        }
+        return { results: [], total: 0 };
     }
 
+    const initialData = await fetchPageWithRetry(0);
     const total = initialData.total || (initialData.results || []).length;
     let allResults = [...(initialData.results || [])];
 
@@ -51,28 +71,19 @@ async function fetchAllCompaniesFromHubSpot(token) {
             pageOffsets.push(offset);
         }
 
-        // Parallel batching in chunks of 5 requests to optimize speed while respecting rate limits
-        for (let i = 0; i < pageOffsets.length; i += 5) {
-            const batch = pageOffsets.slice(i, i + 5);
-            const batchResponses = await Promise.all(
-                batch.map(off =>
-                    fetch('https://api.hubapi.com/crm/v3/objects/companies/search', {
-                        method: 'POST',
-                        headers,
-                        body: JSON.stringify({
-                            limit: 100,
-                            after: off,
-                            sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
-                            properties
-                        })
-                    }).then(r => r.json()).catch(() => ({ results: [] }))
-                )
-            );
+        // Parallel batching in chunks of 3 requests with a micro-pause to prevent 429 burst limits
+        for (let i = 0; i < pageOffsets.length; i += 3) {
+            const batch = pageOffsets.slice(i, i + 3);
+            const batchResponses = await Promise.all(batch.map(off => fetchPageWithRetry(off)));
 
             for (const bData of batchResponses) {
                 if (Array.isArray(bData.results)) {
                     allResults.push(...bData.results);
                 }
+            }
+
+            if (i + 3 < pageOffsets.length) {
+                await new Promise(r => setTimeout(r, 80));
             }
         }
     }

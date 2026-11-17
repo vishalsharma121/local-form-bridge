@@ -1345,11 +1345,18 @@ export default function DealsView({
             <div className="shrink-0 px-5 py-3 bg-slate-50/70 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-500">
               <div className="flex items-center gap-3">
                 <div>
-                  Showing <span className="font-bold text-slate-800">{(currentPage - 1) * pageSize + 1}</span> to{' '}
+                  Showing <span className="font-bold text-slate-800">{((currentPage - 1) * pageSize + 1).toLocaleString()}</span> to{' '}
                   <span className="font-bold text-slate-800">
-                    {Math.min(currentPage * pageSize, filteredDeals.length)}
+                    {Math.min(currentPage * pageSize, filteredDeals.length).toLocaleString()}
                   </span>{' '}
-                  of <span className="font-bold text-slate-800">{filteredDeals.length}</span> entries
+                  of <span className="font-bold text-slate-800">{filteredDeals.length.toLocaleString()}</span>{' '}
+                  {pipelineFilter === 'UPWORK' ? (
+                    <span>Upwork deals <span className="text-slate-400 font-medium">({deals.length} total across all pipelines)</span></span>
+                  ) : filteredDeals.length !== deals.length ? (
+                    <span>filtered deals <span className="text-slate-400 font-medium">({deals.length} total in CRM)</span></span>
+                  ) : (
+                    <span>deals</span>
+                  )}
                 </div>
                 <span className="text-slate-300">|</span>
                 <div className="flex items-center gap-1.5">

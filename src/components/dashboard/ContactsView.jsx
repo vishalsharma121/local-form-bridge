@@ -217,6 +217,7 @@ export function getCreatorBadge(created_by) {
 export default function ContactsView({
   contacts = [],
   allContacts = [],
+  totalContactsCount,
   companies = [],
   deals = [],
   pipelines = [],
@@ -1147,7 +1148,14 @@ export default function ContactsView({
             <div className="shrink-0 px-5 py-3 bg-slate-50/70 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-500">
               <div className="flex items-center gap-3">
                 <span>
-                  Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredContacts.length)} of {filteredContacts.length} contacts
+                  Showing <span className="font-bold text-slate-800">{((currentPage - 1) * pageSize + 1).toLocaleString()}</span> to{' '}
+                  <span className="font-bold text-slate-800">{Math.min(currentPage * pageSize, filteredContacts.length).toLocaleString()}</span> of{' '}
+                  <span className="font-bold text-slate-800">{filteredContacts.length.toLocaleString()}</span>{' '}
+                  {totalContactsCount && totalContactsCount > filteredContacts.length ? (
+                    <span>newest active contacts <span className="text-slate-400 font-medium">({totalContactsCount.toLocaleString()} total in CRM)</span></span>
+                  ) : (
+                    <span>contacts</span>
+                  )}
                 </span>
                 <span className="text-slate-300">|</span>
                 <div className="flex items-center gap-1.5">
