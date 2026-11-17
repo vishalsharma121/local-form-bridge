@@ -1,5 +1,5 @@
 import { getHubSpotToken, MISSING_TOKEN_ERROR } from '../lib/hubspot.js';
-import { getLeadSourcesMap, recordLeadSource } from '../lib/leadSourceTracker.js';
+import { getLeadSourcesMap, recordLeadSource, assignDeal } from '../lib/leadSourceTracker.js';
 import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
 import { authenticateRequest } from '../lib/userAuth.js';
@@ -56,6 +56,11 @@ export default async function handler(req, res) {
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
                 const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
                 const creatorEmail = typeof srcInfo === 'object' ? srcInfo?.created_by_email : null;
+                const assignedTo = srcInfo?.assigned_to || null;
+                const assignedUserId = srcInfo?.assigned_user_id ? Number(srcInfo.assigned_user_id) : null;
+                const assignedUserEmail = srcInfo?.assigned_user_email || null;
+                const assignedAt = srcInfo?.assigned_at || null;
+                const assignedBy = srcInfo?.assigned_by || null;
                 const description = d.properties.description || '';
 
                 let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
@@ -102,6 +107,11 @@ export default async function handler(req, res) {
                     created_by: creator,
                     created_by_user_id: creatorUserId,
                     created_by_email: creatorEmail,
+                    assigned_to: assignedTo,
+                    assigned_user_id: assignedUserId,
+                    assigned_user_email: assignedUserEmail,
+                    assigned_at: assignedAt,
+                    assigned_by: assignedBy,
                     description: description,
                     createdate: d.properties.createdate,
                 };
@@ -137,20 +147,34 @@ export default async function handler(req, res) {
                 }
             }
 
-            // Role-based visibility: Super Admin and Admin see all deals, Team Member only sees self-created deals
+            // Role-based visibility: Super Admin and Admin see all deals, Team Member only sees assigned or self-created deals
             const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
             let visibleDeals = deals;
 
             if (!isSuperAdmin) {
                 const userEmail = (auth.user?.email || '').toLowerCase().trim();
                 const userId = Number(auth.user?.userId || auth.user?.id);
+                const userName = (auth.user?.name || '').toLowerCase().trim();
 
                 visibleDeals = deals.filter((d) => {
+                    // 1. Explicit Assignment to Team Member
+                    const isAssignedId = d.assigned_user_id && Number(d.assigned_user_id) === userId;
+                    const isAssignedEmail = d.assigned_user_email && d.assigned_user_email.toLowerCase().trim() === userEmail;
+                    const isAssignedName = d.assigned_to && d.assigned_to.toLowerCase().trim() === userName;
+
+                    // 2. Self-Created Deals
                     const matchCreatorId = d.created_by_user_id && Number(d.created_by_user_id) === userId;
                     const matchCreatorEmail = d.created_by_email && d.created_by_email.toLowerCase().trim() === userEmail;
                     const matchDescriptionEmail = userEmail && d.description && d.description.toLowerCase().includes(userEmail);
 
-                    return Boolean(matchCreatorId || matchCreatorEmail || matchDescriptionEmail);
+                    // 3. Fallback: Deal title contains team member name (e.g. "upwork - Rakesh - ...")
+                    const isNameInTitle = userName && userName.length >= 3 && d.dealname && (
+                        d.dealname.toLowerCase().startsWith(`upwork - ${userName}`) ||
+                        d.dealname.toLowerCase().includes(`- ${userName} -`) ||
+                        d.dealname.toLowerCase().includes(`- ${userName}`)
+                    );
+
+                    return Boolean(isAssignedId || isAssignedEmail || isAssignedName || matchCreatorId || matchCreatorEmail || matchDescriptionEmail || isNameInTitle);
                 });
                 console.log(`🔒 [API/Deals] Filtered deals for team member "${auth.user?.email}": ${visibleDeals.length} of ${deals.length} deals visible`);
             }
@@ -171,6 +195,38 @@ export default async function handler(req, res) {
             if (!auth.authenticated) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
+
+            // Action: Assign Deal(s) to a team member
+            if (req.body?.action === 'assign') {
+                const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
+                if (!isSuperAdmin) {
+                    return res.status(403).json({ error: 'Permission denied. Only managers/admins can assign deals.' });
+                }
+
+                const { dealId, dealIds, assignedUserId, assignedTo, assignedUserEmail } = req.body || {};
+                const targetIds = Array.isArray(dealIds) ? dealIds : dealId ? [dealId] : [];
+
+                if (targetIds.length === 0) {
+                    return res.status(400).json({ error: 'Please provide at least one deal ID to assign.' });
+                }
+
+                for (const id of targetIds) {
+                    await assignDeal(id, assignedUserId, assignedTo, assignedUserEmail, auth.user?.name || 'Admin User');
+                }
+
+                await logSyncActivity({
+                    type: 'deal',
+                    operation: 'UPDATE',
+                    entityId: String(targetIds[0]),
+                    message: `Assigned ${targetIds.length} deal(s) to ${assignedTo || 'team member'} by ${auth.user?.name || 'Admin'}`,
+                    status: 'SUCCESS',
+                    statusCode: 200,
+                    performedBy: auth.user?.name || 'Admin User'
+                });
+
+                return res.status(200).json({ success: true, count: targetIds.length, assignedTo });
+            }
+
             if (!can(auth.user, 'create', 'deals')) {
                 return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow creating deals.' });
             }
@@ -425,12 +481,21 @@ export default async function handler(req, res) {
             if (!isSuperAdmin) {
                 const userEmail = (auth.user?.email || '').toLowerCase().trim();
                 const userId = Number(auth.user?.userId || auth.user?.id);
+                const userName = (auth.user?.name || '').toLowerCase().trim();
                 const sourcesMap = await getLeadSourcesMap();
                 const srcInfo = sourcesMap[String(dealId)];
                 const isOwner = (srcInfo?.created_by_user_id && Number(srcInfo.created_by_user_id) === userId) ||
-                                (srcInfo?.created_by_email && srcInfo.created_by_email.toLowerCase().trim() === userEmail);
+                                (srcInfo?.created_by_email && srcInfo.created_by_email.toLowerCase().trim() === userEmail) ||
+                                (srcInfo?.assigned_user_id && Number(srcInfo.assigned_user_id) === userId) ||
+                                (srcInfo?.assigned_user_email && srcInfo.assigned_user_email.toLowerCase().trim() === userEmail) ||
+                                (srcInfo?.assigned_to && srcInfo.assigned_to.toLowerCase().trim() === userName);
                 if (!isOwner) {
-                    return res.status(403).json({ error: 'Permission denied. Team members can only update deals they created.' });
+                    return res.status(403).json({ error: 'Permission denied. Team members can only update deals assigned to them or created by them.' });
+                }
+            } else {
+                // If manager updates assigned_user_id or assigned_to
+                if (req.body?.assigned_user_id !== undefined || req.body?.assigned_to !== undefined) {
+                    await assignDeal(dealId, req.body.assigned_user_id, req.body.assigned_to, req.body.assigned_user_email, auth.user?.name || 'Admin User');
                 }
             }
 

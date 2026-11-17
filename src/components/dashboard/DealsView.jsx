@@ -54,9 +54,14 @@ export default function DealsView({
   const canEdit = can('edit', 'deals');
   const canDelete = can('delete', 'deals');
   const [searchQuery, setSearchQuery] = useState('');
-  const [pipelineFilter, setPipelineFilter] = useState('ALL');
+  const [pipelineFilter, setPipelineFilter] = useState('UPWORK');
   const [stageFilter, setStageFilter] = useState('ALL');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState('ALL');
+  const [handlerFilter, setHandlerFilter] = useState('ALL');
+  const [selectedDealIds, setSelectedDealIds] = useState([]);
+  const [assignDropdownOpenDealId, setAssignDropdownOpenDealId] = useState(null);
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [teamMembers, setTeamMembers] = useState([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
@@ -79,9 +84,10 @@ export default function DealsView({
     let isMounted = true;
     async function fetchMetadata() {
       try {
-        const [ownersRes, propsRes] = await Promise.allSettled([
+        const [ownersRes, propsRes, usersRes] = await Promise.allSettled([
           fetch('/api/hubspot-owners', { headers: getAuthHeaders() }),
-          fetch('/api/hubspot-properties', { headers: getAuthHeaders() })
+          fetch('/api/hubspot-properties', { headers: getAuthHeaders() }),
+          isSuperAdmin ? fetch('/api/users', { headers: getAuthHeaders() }) : Promise.reject()
         ]);
 
         if (isMounted && ownersRes.status === 'fulfilled' && ownersRes.value.ok) {
@@ -100,13 +106,20 @@ export default function DealsView({
             setDealPriorities(propData.dealPriorities);
           }
         }
+
+        if (isMounted && usersRes.status === 'fulfilled' && usersRes.value.ok) {
+          const uData = await usersRes.value.json();
+          if (Array.isArray(uData.users)) {
+            setTeamMembers(uData.users.filter(u => u.is_active));
+          }
+        }
       } catch {
         // Fallbacks remain active
       }
     }
     fetchMetadata();
     return () => { isMounted = false; };
-  }, []);
+  }, [isSuperAdmin]);
 
   // Active pipelines from HubSpot API (with fallback if empty)
   const activePipelines = useMemo(() => {
@@ -183,6 +196,102 @@ export default function DealsView({
     );
   };
 
+  // Helper to test if a deal is an Upwork deal (by pipeline or title)
+  const isUpworkDeal = (d) => {
+    const pipe = (d.pipeline || '').toLowerCase();
+    const name = (d.dealname || '').toLowerCase();
+    return pipe.includes('upwork') || name.startsWith('upwork') || name.includes('upwork');
+  };
+
+  const upworkDealsCount = useMemo(() => {
+    return deals.filter(isUpworkDeal).length;
+  }, [deals]);
+
+  const unassignedDealsCount = useMemo(() => {
+    return deals.filter(d => !d.assigned_user_id && !d.assigned_to).length;
+  }, [deals]);
+
+  // Render Deal Handled By badge
+  const getHandlerBadge = (d) => {
+    if (d.assigned_to) {
+      const initials = d.assigned_to
+        .split(' ')
+        .map(n => n[0])
+        .join('')
+        .substring(0, 2)
+        .toUpperCase();
+
+      return (
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-50 text-purple-900 border border-purple-200/80 shadow-2xs font-extrabold text-xs">
+          <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">
+            {initials}
+          </span>
+          <span className="truncate max-w-[120px]">{d.assigned_to}</span>
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-50 text-amber-800 border border-amber-200/80 text-[11px] font-bold">
+        <UserPlus className="w-3 h-3 text-amber-600" />
+        <span>Needs Handler</span>
+      </span>
+    );
+  };
+
+  // Assign deal to a team member
+  const handleAssignDeal = async (dealId, member) => {
+    try {
+      setIsAssigning(true);
+      const res = await fetch('/api/deals', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          action: 'assign',
+          dealId,
+          assignedUserId: member ? member.id : null,
+          assignedTo: member ? member.name : null,
+          assignedUserEmail: member ? member.email : null
+        })
+      });
+      if (res.ok) {
+        setAssignDropdownOpenDealId(null);
+        if (onRefreshDeals) onRefreshDeals();
+      }
+    } catch (err) {
+      console.error('Failed to assign deal:', err);
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  // Bulk assign selected deals to a team member
+  const handleBulkAssign = async (member) => {
+    if (selectedDealIds.length === 0) return;
+    try {
+      setIsAssigning(true);
+      const res = await fetch('/api/deals', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          action: 'assign',
+          dealIds: selectedDealIds,
+          assignedUserId: member ? member.id : null,
+          assignedTo: member ? member.name : null,
+          assignedUserEmail: member ? member.email : null
+        })
+      });
+      if (res.ok) {
+        setSelectedDealIds([]);
+        if (onRefreshDeals) onRefreshDeals();
+      }
+    } catch (err) {
+      console.error('Failed to bulk assign deals:', err);
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
   // Edit & Delete state for deals
   const [editingDeal, setEditingDeal] = useState(null);
   const [editDealData, setEditDealData] = useState({
@@ -192,6 +301,8 @@ export default function DealsView({
     amount: '',
     closedate: '',
     hubspot_owner_id: '',
+    assigned_user_id: '',
+    assigned_to: '',
     dealtype: '',
     hs_priority: ''
   });
@@ -221,6 +332,8 @@ export default function DealsView({
       amount: d.amount || '',
       closedate: formattedCloseDate,
       hubspot_owner_id: d.hubspot_owner_id || '',
+      assigned_user_id: d.assigned_user_id || '',
+      assigned_to: d.assigned_to || '',
       dealtype: d.dealtype || '',
       hs_priority: d.hs_priority || ''
     });
@@ -258,6 +371,8 @@ export default function DealsView({
           amount: editDealData.amount,
           closedate: editDealData.closedate || '',
           hubspot_owner_id: editDealData.hubspot_owner_id || '',
+          assigned_user_id: editDealData.assigned_user_id || null,
+          assigned_to: editDealData.assigned_to || null,
           dealtype: editDealData.dealtype || '',
           hs_priority: editDealData.hs_priority || ''
         })
@@ -679,15 +794,32 @@ export default function DealsView({
         (d.dealname && d.dealname.toLowerCase().includes(q)) ||
         (d.pipeline && d.pipeline.toLowerCase().includes(q)) ||
         pipeLabel.includes(q) ||
-        (d.dealstage && d.dealstage.toLowerCase().includes(q));
+        (d.dealstage && d.dealstage.toLowerCase().includes(q)) ||
+        (d.assigned_to && d.assigned_to.toLowerCase().includes(q));
 
-      const matchesPipeline = pipelineFilter === 'ALL' || d.pipeline === pipelineFilter;
+      const matchesPipeline =
+        pipelineFilter === 'ALL'
+          ? true
+          : pipelineFilter === 'UPWORK'
+          ? isUpworkDeal(d)
+          : d.pipeline === pipelineFilter;
+
       const matchesStage = stageFilter === 'ALL' || d.dealstage === stageFilter;
       const matchesSource = selectedSourceFilter === 'ALL' || getNormalizedSource(d.lead_source, d.created_by) === selectedSourceFilter;
 
-      return matchesQuery && matchesPipeline && matchesStage && matchesSource;
+      const matchesHandler =
+        handlerFilter === 'ALL'
+          ? true
+          : handlerFilter === 'UNASSIGNED'
+          ? (!d.assigned_user_id && !d.assigned_to)
+          : handlerFilter === 'ASSIGNED'
+          ? Boolean(d.assigned_user_id || d.assigned_to)
+          : (d.assigned_user_id && String(d.assigned_user_id) === String(handlerFilter)) ||
+            (d.assigned_to && d.assigned_to.toLowerCase().trim() === String(handlerFilter).toLowerCase().trim());
+
+      return matchesQuery && matchesPipeline && matchesStage && matchesSource && matchesHandler;
     });
-  }, [deals, searchQuery, pipelineFilter, stageFilter, selectedSourceFilter, activePipelines]);
+  }, [deals, searchQuery, pipelineFilter, stageFilter, selectedSourceFilter, handlerFilter, activePipelines]);
 
   const totalPages = Math.ceil(filteredDeals.length / pageSize) || 1;
   const paginatedDeals = useMemo(() => {
@@ -827,7 +959,8 @@ export default function DealsView({
               }}
               className="bg-transparent text-slate-800 font-extrabold focus:outline-none cursor-pointer"
             >
-              <option value="ALL">All Pipelines ({activePipelines.length})</option>
+              <option value="UPWORK">Upwork Deals Only ({upworkDealsCount})</option>
+              <option value="ALL">All Pipelines ({deals.length})</option>
               {activePipelines.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
@@ -835,6 +968,30 @@ export default function DealsView({
               ))}
             </select>
           </div>
+
+          {/* Handled By Filter (Admins) */}
+          {isSuperAdmin && (
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-2 text-xs">
+              <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+              <select
+                value={handlerFilter}
+                onChange={(e) => {
+                  setHandlerFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+                className="bg-transparent text-slate-800 font-extrabold focus:outline-none cursor-pointer"
+              >
+                <option value="ALL">All Handlers</option>
+                <option value="UNASSIGNED">Needs Handler ({unassignedDealsCount})</option>
+                <option value="ASSIGNED">Assigned Deals ({deals.length - unassignedDealsCount})</option>
+                {teamMembers.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name || m.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Stage Filter */}
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200/80 rounded-xl px-3 py-2 text-xs">
@@ -890,6 +1047,45 @@ export default function DealsView({
         </div>
       </div>
 
+      {/* Bulk Assignment Bar */}
+      {isSuperAdmin && selectedDealIds.length > 0 && (
+        <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-2.5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-fade-in text-xs font-semibold shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-[#EE3124] text-white flex items-center justify-center font-black text-xs">
+              {selectedDealIds.length}
+            </span>
+            <span>deal(s) selected for bulk assignment</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-slate-300 text-xs font-medium">Assign to:</span>
+            <select
+              onChange={(e) => {
+                if (!e.target.value) return;
+                const member = teamMembers.find(m => String(m.id) === String(e.target.value));
+                handleBulkAssign(member || null);
+                e.target.value = '';
+              }}
+              disabled={isAssigning}
+              className="bg-slate-800 text-white text-xs font-bold border border-slate-600 rounded-xl px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#EE3124] cursor-pointer"
+            >
+              <option value="">Select sales team member...</option>
+              {teamMembers.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name} ({m.email})
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setSelectedDealIds([])}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer text-xs font-bold"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Deals Table */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col flex-1 min-h-0">
         {loading && (
@@ -934,7 +1130,29 @@ export default function DealsView({
               <table className="w-full text-left text-xs">
                 <thead className="sticky top-0 bg-slate-50 z-10 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
                   <tr>
+                    {isSuperAdmin && (
+                      <th className="w-10 px-3 py-3 text-center">
+                        <input
+                          type="checkbox"
+                          checked={
+                            paginatedDeals.length > 0 &&
+                            paginatedDeals.every(d => selectedDealIds.includes(d.id))
+                          }
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              const idsOnPage = paginatedDeals.map(d => d.id);
+                              setSelectedDealIds(prev => Array.from(new Set([...prev, ...idsOnPage])));
+                            } else {
+                              const idsOnPageSet = new Set(paginatedDeals.map(d => d.id));
+                              setSelectedDealIds(prev => prev.filter(id => !idsOnPageSet.has(id)));
+                            }
+                          }}
+                          className="rounded border-slate-300 text-[#EE3124] focus:ring-[#EE3124] cursor-pointer"
+                        />
+                      </th>
+                    )}
                     <th className="px-4 py-3 font-extrabold">Deal Name</th>
+                    <th className="px-4 py-3 font-extrabold">Handled By</th>
                     <th className="px-4 py-3 font-extrabold">Pipeline</th>
                     <th className="px-4 py-3 font-extrabold">Deal Stage</th>
                     <th className="px-4 py-3 font-extrabold">Amount</th>
@@ -947,6 +1165,22 @@ export default function DealsView({
                 <tbody className="divide-y divide-slate-100 text-slate-700">
                   {paginatedDeals.map((d) => (
                     <tr key={d.id} className="hover:bg-slate-50/80 transition-colors group">
+                      {isSuperAdmin && (
+                        <td className="w-10 px-3 py-3.5 text-center">
+                          <input
+                            type="checkbox"
+                            checked={selectedDealIds.includes(d.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedDealIds(prev => [...prev, d.id]);
+                              } else {
+                                setSelectedDealIds(prev => prev.filter(id => id !== d.id));
+                              }
+                            }}
+                            className="rounded border-slate-300 text-[#EE3124] focus:ring-[#EE3124] cursor-pointer"
+                          />
+                        </td>
+                      )}
                       <td className="px-4 py-3.5 font-bold text-slate-900">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-50 to-orange-50 text-amber-600 flex items-center justify-center shrink-0 border border-amber-100/80 shadow-2xs group-hover:scale-105 transition-transform">
@@ -958,6 +1192,77 @@ export default function DealsView({
                               {d.id ? `ID #${d.id}` : 'HubSpot Sales Pipeline'}
                             </span>
                           </div>
+                        </div>
+                      </td>
+
+                      <td className="px-4 py-3.5 whitespace-nowrap">
+                        <div className="relative inline-block text-left">
+                          {isSuperAdmin ? (
+                            <button
+                              type="button"
+                              onClick={() => setAssignDropdownOpenDealId(assignDropdownOpenDealId === d.id ? null : d.id)}
+                              className="group/assign inline-flex items-center gap-1.5 focus:outline-none cursor-pointer rounded-xl hover:ring-2 hover:ring-purple-400/40 transition-all"
+                              title="Click to assign deal to a sales team member"
+                            >
+                              {getHandlerBadge(d)}
+                              <ChevronDown className="w-3 h-3 text-slate-400 group-hover/assign:text-purple-600 transition-colors" />
+                            </button>
+                          ) : (
+                            getHandlerBadge(d)
+                          )}
+
+                          {isSuperAdmin && assignDropdownOpenDealId === d.id && (
+                            <>
+                              <div 
+                                className="fixed inset-0 z-40" 
+                                onClick={() => setAssignDropdownOpenDealId(null)}
+                              />
+                              <div className="absolute left-0 mt-1.5 w-60 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 py-1.5 animate-modal-pop text-xs">
+                                <div className="px-3 py-1.5 border-b border-slate-100 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                                  <span>Assign Deal Handler</span>
+                                  {isAssigning && <Loader2 className="w-3 h-3 animate-spin text-purple-600" />}
+                                </div>
+                                <div className="max-h-48 overflow-y-auto py-1">
+                                  {teamMembers.length === 0 ? (
+                                    <div className="px-3 py-2 text-slate-400 text-xs italic">No active team members</div>
+                                  ) : (
+                                    teamMembers.map((m) => {
+                                      const isSelected = String(d.assigned_user_id) === String(m.id) || d.assigned_to === m.name;
+                                      return (
+                                        <button
+                                          key={m.id}
+                                          type="button"
+                                          disabled={isAssigning}
+                                          onClick={() => handleAssignDeal(d.id, m)}
+                                          className={`w-full text-left px-3 py-1.5 flex items-center justify-between hover:bg-purple-50 transition-colors cursor-pointer ${
+                                            isSelected ? 'font-black text-purple-700 bg-purple-50/60' : 'text-slate-700 font-medium'
+                                          }`}
+                                        >
+                                          <div className="truncate pr-2">
+                                            <div className="font-bold truncate">{m.name}</div>
+                                            <div className="text-[10px] text-slate-400 truncate">{m.email}</div>
+                                          </div>
+                                          {isSelected && <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />}
+                                        </button>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                                {d.assigned_to && (
+                                  <div className="border-t border-slate-100 pt-1">
+                                    <button
+                                      type="button"
+                                      disabled={isAssigning}
+                                      onClick={() => handleAssignDeal(d.id, null)}
+                                      className="w-full text-left px-3 py-1.5 text-rose-600 font-bold hover:bg-rose-50 transition-colors cursor-pointer text-[11px]"
+                                    >
+                                      Clear Handler (Unassign)
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
                         </div>
                       </td>
 
@@ -1945,6 +2250,33 @@ export default function DealsView({
                     </select>
                   </div>
                 </div>
+
+                {isSuperAdmin && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
+                      Deal Handled By (Assigned Sales Team Member)
+                    </label>
+                    <select
+                      value={editDealData.assigned_user_id || ''}
+                      onChange={(e) => {
+                        const mem = teamMembers.find(m => String(m.id) === String(e.target.value));
+                        setEditDealData({
+                          ...editDealData,
+                          assigned_user_id: e.target.value || '',
+                          assigned_to: mem ? mem.name : ''
+                        });
+                      }}
+                      className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] transition-all cursor-pointer text-xs font-bold"
+                    >
+                      <option value="">-- Unassigned (Needs Handler) --</option>
+                      {teamMembers.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div className="pt-2 flex items-center justify-end gap-2">
                   <button
