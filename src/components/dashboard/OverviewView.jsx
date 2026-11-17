@@ -92,7 +92,10 @@ export default function OverviewView({
   initialLoading, 
   onNavigate, 
   onExportCSV, 
-  onSelectContact 
+  onSelectContact,
+  totalContactsCount,
+  totalCompaniesCount,
+  totalDealsCount
 }) {
   const { can } = useAuth() || {};
   const canViewContacts = can ? can('view', 'contacts') : true;
@@ -105,9 +108,9 @@ export default function OverviewView({
   const [activeRightTab, setActiveRightTab] = useState('contacts');
 
   // Analytics Metrics
-  const totalContacts = contacts.length;
-  const totalCompanies = companies.length;
-  const totalDeals = deals.length;
+  const totalContacts = totalContactsCount !== null && totalContactsCount !== undefined ? totalContactsCount : contacts.length;
+  const totalCompanies = totalCompaniesCount !== null && totalCompaniesCount !== undefined ? totalCompaniesCount : companies.length;
+  const totalDeals = totalDealsCount !== null && totalDealsCount !== undefined ? totalDealsCount : deals.length;
   const totalSyncFailures = errorLogs.filter(log => !log.resolved).length;
 
   // Total Pipeline Dollar Value

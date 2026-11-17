@@ -10,6 +10,76 @@ let cachedPipelines = null;
 let lastPipelinesCheckTime = 0;
 const PIPELINES_CACHE_TTL_MS = 600000; // 10-minute cache for deal pipelines metadata
 
+let dealsCache = null;
+let dealsCacheTime = 0;
+const DEALS_CACHE_TTL_MS = 120 * 1000; // 2 minutes
+
+function invalidateDealsCache() {
+    dealsCache = null;
+    dealsCacheTime = 0;
+}
+
+/**
+ * Concurrently fetches all deals from HubSpot using Search API pagination.
+ */
+async function fetchAllDealsFromHubSpot(token) {
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const properties = [
+        'dealname', 'pipeline', 'dealstage', 'amount', 'closedate',
+        'hubspot_owner_id', 'dealtype', 'hs_priority', 'lead_source',
+        'description', 'createdate'
+    ];
+
+    const initialRes = await fetch('https://api.hubapi.com/crm/v3/objects/deals/search', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            limit: 100,
+            after: 0,
+            sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+            properties
+        })
+    });
+
+    const initialData = await initialRes.json();
+    if (!initialRes.ok) {
+        throw new Error(initialData.message || `HubSpot API error ${initialRes.status}`);
+    }
+
+    const total = initialData.total || (initialData.results || []).length;
+    let allResults = [...(initialData.results || [])];
+
+    if (total > 100) {
+        const pageOffsets = [];
+        for (let offset = 100; offset < total && offset <= 10000; offset += 100) {
+            pageOffsets.push(offset);
+        }
+
+        const remainingPages = await Promise.all(
+            pageOffsets.map(offset =>
+                fetch('https://api.hubapi.com/crm/v3/objects/deals/search', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        limit: 100,
+                        after: offset,
+                        sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+                        properties
+                    })
+                }).then(r => r.json()).catch(() => ({ results: [] }))
+            )
+        );
+
+        for (const page of remainingPages) {
+            if (Array.isArray(page.results)) {
+                allResults.push(...page.results);
+            }
+        }
+    }
+
+    return { results: allResults, total };
+}
+
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
@@ -31,27 +101,19 @@ export default async function handler(req, res) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
-            const response = await fetch(
-                'https://api.hubapi.com/crm/v3/objects/deals?limit=100&properties=dealname,pipeline,dealstage,amount,closedate,hubspot_owner_id,dealtype,hs_priority,lead_source,description,createdate',
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-
-            const responseText = await response.text();
-            let data = {};
-            try {
-                data = JSON.parse(responseText);
-            } catch {
-                data = { error: responseText || `HTTP ${response.status}` };
-            }
-
-            if (!response.ok) {
-                console.error('❌ [API] HubSpot deals fetch error:', response.status, responseText);
-                return res.status(response.status).json(data);
+            const nowDeals = Date.now();
+            let rawDealsData = null;
+            if (dealsCache && (nowDeals - dealsCacheTime < DEALS_CACHE_TTL_MS)) {
+                rawDealsData = dealsCache;
+            } else {
+                rawDealsData = await fetchAllDealsFromHubSpot(token);
+                dealsCache = rawDealsData;
+                dealsCacheTime = nowDeals;
             }
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const deals = (data.results || []).map((d) => {
+            const deals = (rawDealsData.results || []).map((d) => {
                 const srcInfo = sourcesMap[String(d.id)];
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
                 const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
@@ -179,8 +241,8 @@ export default async function handler(req, res) {
                 console.log(`🔒 [API/Deals] Filtered deals for team member "${auth.user?.email}": ${visibleDeals.length} of ${deals.length} deals visible`);
             }
 
-            console.log(`✅ [API] Returning ${visibleDeals.length} deals (total ${deals.length}) and ${pipelines.length} pipelines`);
-            return res.status(200).json({ deals: visibleDeals, pipelines });
+            console.log(`✅ [API] Returning ${visibleDeals.length} deals (total in CRM: ${rawDealsData.total}) and ${pipelines.length} pipelines`);
+            return res.status(200).json({ deals: visibleDeals, total: rawDealsData.total, pipelines });
         } catch (err) {
             console.error('🔥 [API] Unexpected error:', err);
             return res.status(500).json({ error: 'Failed to load deals.' });
@@ -224,6 +286,7 @@ export default async function handler(req, res) {
                     performedBy: auth.user?.name || 'Admin User'
                 });
 
+                invalidateDealsCache();
                 return res.status(200).json({ success: true, count: targetIds.length, assignedTo });
             }
 
@@ -431,6 +494,7 @@ export default async function handler(req, res) {
                 }
             }
 
+            invalidateDealsCache();
             return res.status(200).json({
                 success: true,
                 deal: dealData,
@@ -700,6 +764,7 @@ export default async function handler(req, res) {
                 details: { dealId, changes, data }
             });
 
+            invalidateDealsCache();
             return res.status(200).json({ success: true, deal: data, changes });
         } catch (err) {
             console.error('🔥 [API] Edit deal error:', err);
@@ -773,6 +838,7 @@ export default async function handler(req, res) {
                 details: null
             });
 
+            invalidateDealsCache();
             return res.status(200).json({ success: true, message: 'Deal deleted successfully.' });
         } catch (err) {
             console.error('🔥 [API] Delete deal error:', err);

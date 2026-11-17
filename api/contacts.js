@@ -23,6 +23,73 @@ function sanitizeAndValidatePhone(rawPhone) {
     return { valid: true, phone: cleaned };
 }
 
+let contactsCache = null;
+let contactsCacheTime = 0;
+const CONTACTS_CACHE_TTL_MS = 120 * 1000; // 2 minutes
+
+function invalidateContactsCache() {
+    contactsCache = null;
+    contactsCacheTime = 0;
+}
+
+/**
+ * Concurrently fetches recent contacts from HubSpot using Search API sorted newest first,
+ * and retrieves the exact CRM total count.
+ */
+async function fetchContactsFromHubSpot(token) {
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const properties = [
+        'firstname', 'lastname', 'email', 'phone', 'jobtitle',
+        'hubspot_owner_id', 'lifecyclestage', 'hs_lead_status',
+        'subject', 'message', 'lead_source', 'createdate'
+    ];
+
+    const initialRes = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            limit: 100,
+            after: 0,
+            sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+            properties
+        })
+    });
+
+    const initialData = await initialRes.json();
+    if (!initialRes.ok) {
+        throw new Error(initialData.message || `HubSpot API error ${initialRes.status}`);
+    }
+
+    const total = initialData.total || (initialData.results || []).length;
+    let allResults = [...(initialData.results || [])];
+
+    if (total > 100) {
+        const nextOffsets = [100, 200].filter(off => off < total);
+        const additionalPages = await Promise.all(
+            nextOffsets.map(offset =>
+                fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        limit: 100,
+                        after: offset,
+                        sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+                        properties
+                    })
+                }).then(r => r.json()).catch(() => ({ results: [] }))
+            )
+        );
+
+        for (const page of additionalPages) {
+            if (Array.isArray(page.results)) {
+                allResults.push(...page.results);
+            }
+        }
+    }
+
+    return { results: allResults, total };
+}
+
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
@@ -44,27 +111,19 @@ export default async function handler(req, res) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
-            const response = await fetch(
-                'https://api.hubapi.com/crm/v3/objects/contacts?limit=100&properties=firstname,lastname,email,phone,jobtitle,hubspot_owner_id,lifecyclestage,hs_lead_status,subject,message,lead_source,createdate&associations=companies,deals&sorts=-createdate',
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-
-            const responseText = await response.text();
-            let data = {};
-            try {
-                data = JSON.parse(responseText);
-            } catch {
-                data = { error: responseText || `HTTP ${response.status}` };
-            }
-
-            if (!response.ok) {
-                console.error('❌ [API] HubSpot contacts fetch error:', response.status, responseText);
-                return res.status(response.status).json(data);
+            const nowContacts = Date.now();
+            let rawContactsData = null;
+            if (contactsCache && (nowContacts - contactsCacheTime < CONTACTS_CACHE_TTL_MS)) {
+                rawContactsData = contactsCache;
+            } else {
+                rawContactsData = await fetchContactsFromHubSpot(token);
+                contactsCache = rawContactsData;
+                contactsCacheTime = nowContacts;
             }
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const contacts = (data.results || []).map((c) => {
+            const contacts = (rawContactsData.results || []).map((c) => {
                 const fn = c.properties.firstname || '';
                 const ln = (c.properties.lastname === '-' ? '' : c.properties.lastname) || '';
                 const srcInfo = sourcesMap[String(c.id)];
@@ -120,7 +179,8 @@ export default async function handler(req, res) {
                 };
             }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
 
-            return res.status(200).json({ contacts });
+            console.log(`✅ [API] Returning ${contacts.length} contacts (total in CRM: ${rawContactsData.total})`);
+            return res.status(200).json({ contacts, total: rawContactsData.total });
         } catch (err) {
             console.error('🔥 [API] Unexpected error:', err);
             return res.status(500).json({ error: 'Failed to load contacts.' });
@@ -865,6 +925,7 @@ export default async function handler(req, res) {
 
             const debugMode = req.headers['x-debug-mode'] === 'true';
 
+            invalidateContactsCache();
             return res.status(200).json({
                 ...data,
                 action,
@@ -1177,6 +1238,7 @@ export default async function handler(req, res) {
                 details: { contactId, changes, data }
             });
 
+            invalidateContactsCache();
             return res.status(200).json({ success: true, contact: data, changes });
         } catch (err) {
             console.error('🔥 [API] Edit contact error:', err);
@@ -1264,6 +1326,7 @@ export default async function handler(req, res) {
                 details: null
             });
 
+            invalidateContactsCache();
             return res.status(200).json({ success: true, message: 'Contact deleted successfully.' });
         } catch (err) {
             console.error('🔥 [API] Delete contact error:', err);

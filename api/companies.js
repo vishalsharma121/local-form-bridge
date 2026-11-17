@@ -6,6 +6,80 @@ import { authenticateRequest } from '../lib/userAuth.js';
 import { can, formatRole } from '../lib/permissions.js';
 import { getHubSpotOwnerIdByEmail, createHubSpotNote } from '../lib/hubspotOwners.js';
 
+let companiesCache = null;
+let companiesCacheTime = 0;
+const COMPANIES_CACHE_TTL_MS = 120 * 1000; // 2 minutes
+
+function invalidateCompaniesCache() {
+    companiesCache = null;
+    companiesCacheTime = 0;
+}
+
+/**
+ * Concurrently fetches all companies from HubSpot using Search API pagination in parallel batches.
+ */
+async function fetchAllCompaniesFromHubSpot(token) {
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const properties = [
+        'name', 'domain', 'hubspot_owner_id', 'industry', 'type', 'city',
+        'state', 'zip', 'numberofemployees', 'annualrevenue', 'timezone',
+        'description', 'linkedin_company_page', 'lead_source', 'createdate'
+    ];
+
+    const initialRes = await fetch('https://api.hubapi.com/crm/v3/objects/companies/search', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            limit: 100,
+            after: 0,
+            sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+            properties
+        })
+    });
+
+    const initialData = await initialRes.json();
+    if (!initialRes.ok) {
+        throw new Error(initialData.message || `HubSpot API error ${initialRes.status}`);
+    }
+
+    const total = initialData.total || (initialData.results || []).length;
+    let allResults = [...(initialData.results || [])];
+
+    if (total > 100) {
+        const pageOffsets = [];
+        for (let offset = 100; offset < total && offset <= 10000; offset += 100) {
+            pageOffsets.push(offset);
+        }
+
+        // Parallel batching in chunks of 5 requests to optimize speed while respecting rate limits
+        for (let i = 0; i < pageOffsets.length; i += 5) {
+            const batch = pageOffsets.slice(i, i + 5);
+            const batchResponses = await Promise.all(
+                batch.map(off =>
+                    fetch('https://api.hubapi.com/crm/v3/objects/companies/search', {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                            limit: 100,
+                            after: off,
+                            sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
+                            properties
+                        })
+                    }).then(r => r.json()).catch(() => ({ results: [] }))
+                )
+            );
+
+            for (const bData of batchResponses) {
+                if (Array.isArray(bData.results)) {
+                    allResults.push(...bData.results);
+                }
+            }
+        }
+    }
+
+    return { results: allResults, total };
+}
+
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
@@ -27,27 +101,19 @@ export default async function handler(req, res) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
-            const response = await fetch(
-                'https://api.hubapi.com/crm/v3/objects/companies?limit=100&properties=name,domain,hubspot_owner_id,industry,type,city,state,zip,numberofemployees,annualrevenue,timezone,description,linkedin_company_page,lead_source,createdate',
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-
-            const responseText = await response.text();
-            let data = {};
-            try {
-                data = JSON.parse(responseText);
-            } catch {
-                data = { error: responseText || `HTTP ${response.status}` };
-            }
-
-            if (!response.ok) {
-                console.error('❌ [API] HubSpot companies fetch error:', response.status, responseText);
-                return res.status(response.status).json(data);
+            const nowComp = Date.now();
+            let rawCompaniesData = null;
+            if (companiesCache && (nowComp - companiesCacheTime < COMPANIES_CACHE_TTL_MS)) {
+                rawCompaniesData = companiesCache;
+            } else {
+                rawCompaniesData = await fetchAllCompaniesFromHubSpot(token);
+                companiesCache = rawCompaniesData;
+                companiesCacheTime = nowComp;
             }
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const companies = (data.results || []).map((c) => {
+            const companies = (rawCompaniesData.results || []).map((c) => {
                 const srcInfo = sourcesMap[String(c.id)];
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
                 let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
@@ -101,8 +167,8 @@ export default async function handler(req, res) {
                 };
             }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
 
-            console.log(`✅ [API] Returning ${companies.length} companies`);
-            return res.status(200).json({ companies });
+            console.log(`✅ [API] Returning ${companies.length} companies (total in CRM: ${rawCompaniesData.total})`);
+            return res.status(200).json({ companies, total: rawCompaniesData.total });
         } catch (err) {
             console.error('🔥 [API] Unexpected error:', err);
             return res.status(500).json({ error: 'Failed to load companies.' });
@@ -405,6 +471,7 @@ export default async function handler(req, res) {
                 }
             }
 
+            invalidateCompaniesCache();
             return res.status(200).json({
                 success: true,
                 company: companyData,
@@ -717,6 +784,7 @@ export default async function handler(req, res) {
                 details: { companyId, changes, data }
             });
 
+            invalidateCompaniesCache();
             return res.status(200).json({ success: true, company: data, changes });
         } catch (err) {
             console.error('🔥 [API] Edit company error:', err);
@@ -777,6 +845,7 @@ export default async function handler(req, res) {
                 details: null
             });
 
+            invalidateCompaniesCache();
             return res.status(200).json({ success: true, message: 'Company deleted successfully.' });
         } catch (err) {
             console.error('🔥 [API] Delete company error:', err);

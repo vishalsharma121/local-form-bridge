@@ -202,7 +202,7 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
                             : 'bg-slate-100 text-slate-500 border-slate-200/80')
                           }`}
                       >
-                        {item.badge}
+                        {typeof item.badge === 'number' ? item.badge.toLocaleString() : item.badge}
                       </span>
                     )}
                   </button>
@@ -250,7 +250,7 @@ export default function Sidebar({ activeTab, setActiveTab, contactsCount, compan
                             : 'bg-slate-100 text-slate-500 border-slate-200/80')
                           }`}
                       >
-                        {item.badge}
+                        {typeof item.badge === 'number' ? item.badge.toLocaleString() : item.badge}
                       </span>
                     )}
                   </button>

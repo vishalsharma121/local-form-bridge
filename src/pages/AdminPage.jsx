@@ -85,6 +85,9 @@ function AdminDashboardContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedContact, setSelectedContact] = useState(null);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [totalContactsCount, setTotalContactsCount] = useState(null);
+  const [totalCompaniesCount, setTotalCompaniesCount] = useState(null);
+  const [totalDealsCount, setTotalDealsCount] = useState(null);
 
   // LOAD DATA FROM HUBSPOT & ERROR LOG APIs
   const loadContacts = useCallback(async (silent = false) => {
@@ -108,6 +111,7 @@ function AdminDashboardContent() {
       if (!res.ok) throw new Error('Failed to load contacts data');
       const data = await res.json();
       setContacts(data.contacts || []);
+      if (data.total !== undefined) setTotalContactsCount(data.total);
       setLastSyncedAt(new Date().toLocaleTimeString());
       return data;
     } catch (err) {
@@ -136,6 +140,7 @@ function AdminDashboardContent() {
       if (res.ok) {
         const data = await res.json();
         setCompanies(data.companies || []);
+        if (data.total !== undefined) setTotalCompaniesCount(data.total);
         return data;
       }
     } catch (err) {
@@ -164,6 +169,7 @@ function AdminDashboardContent() {
       if (res.ok) {
         const data = await res.json();
         setDeals(data.deals || []);
+        if (data.total !== undefined) setTotalDealsCount(data.total);
         if (data.pipelines) setPipelines(data.pipelines);
         return data;
       }
@@ -399,9 +405,9 @@ function AdminDashboardContent() {
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
-        contactsCount={filteredContacts.length}
-        companiesCount={filteredCompanies.length}
-        dealsCount={filteredDeals.length}
+        contactsCount={totalContactsCount !== null ? totalContactsCount : filteredContacts.length}
+        companiesCount={totalCompaniesCount !== null ? totalCompaniesCount : filteredCompanies.length}
+        dealsCount={totalDealsCount !== null ? totalDealsCount : filteredDeals.length}
         errorLogsCount={unresolvedErrorLogsCount}
         retryQueueCount={unresolvedErrorLogsCount}
         onLogout={logout}
@@ -450,6 +456,9 @@ function AdminDashboardContent() {
               contacts={filteredContacts}
               companies={filteredCompanies}
               deals={filteredDeals}
+              totalContactsCount={totalContactsCount}
+              totalCompaniesCount={totalCompaniesCount}
+              totalDealsCount={totalDealsCount}
               errorLogs={filteredErrorLogs}
               activities={filteredActivities}
               loading={loading}
