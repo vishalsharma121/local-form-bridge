@@ -37,8 +37,43 @@ function invalidateContactsCache() {
 const CONTACT_PROPERTIES = [
     'firstname', 'lastname', 'email', 'phone', 'jobtitle',
     'hubspot_owner_id', 'lifecyclestage', 'hs_lead_status',
-    'subject', 'message', 'lead_source', 'createdate'
+    'subject', 'message', 'lead_source', 'createdate',
+    'hs_object_source', 'hs_object_source_label', 'hs_object_source_detail_1'
 ];
+
+const RECORD_SOURCE_LABEL_MAP = {
+    CRM_UI: 'CRM UI',
+    IMPORT: 'Import',
+    INTEGRATION: 'Integration',
+    EXTENSION: 'Sales Extension',
+    FORM: 'Forms',
+    CONVERSATIONS: 'Conversations',
+    MEETINGS: 'Meetings',
+    EMAIL_INTEGRATION: 'Email Integration',
+    BCC_TO_CRM: 'BCC to CRM',
+    FORWARD_TO_CRM: 'Forward to CRM',
+    MOBILE_ANDROID: 'Mobile Android',
+    MOBILE_IOS: 'Mobile iOS',
+    API: 'API',
+    CONTACTS_WEB: 'Contacts Web',
+    WORKFLOWS: 'Workflows',
+    AUTOMATION_PLATFORM: 'Automation',
+    SOCIAL: 'Social',
+    ADS: 'Ads',
+    SALES: 'Sales',
+    BREEZE: 'Breeze',
+    CHATFLOW: 'Chatflow'
+};
+
+function formatRecordSourceLabel(rawValue) {
+    if (!rawValue) return '—';
+    const key = String(rawValue).trim().toUpperCase();
+    if (RECORD_SOURCE_LABEL_MAP[key]) return RECORD_SOURCE_LABEL_MAP[key];
+    return key
+        .split('_')
+        .map(w => w.charAt(0) + w.slice(1).toLowerCase())
+        .join(' ');
+}
 
 function getNormalizedContactSource(srcInfo, rawPropSource = '') {
     const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
@@ -95,6 +130,7 @@ function formatContactRecord(c, sourcesMap, companyAssocMap = {}, dealAssocMap =
 
     const assocCompIds = companyAssocMap[String(c.id)] || (c.associations?.companies?.results || []).map(r => String(r.id));
     const assocDealIds = dealAssocMap[String(c.id)] || (c.associations?.deals?.results || []).map(r => String(r.id));
+    const rawRecordSource = props.hs_object_source_label || props.hs_object_source || '';
 
     return {
         id: c.id,
@@ -112,6 +148,9 @@ function formatContactRecord(c, sourcesMap, companyAssocMap = {}, dealAssocMap =
         subject: props.subject || '',
         message: props.message || '',
         lead_source: leadSource,
+        record_source: rawRecordSource,
+        record_source_label: formatRecordSourceLabel(rawRecordSource),
+        record_source_detail: props.hs_object_source_detail_1 || '',
         created_by: creator,
         created_by_user_id: creatorUserId || null,
         createdate: props.createdate,
@@ -163,14 +202,22 @@ async function hydrateContactAssociations(contactIds, token) {
 }
 
 /**
- * Server-side paginated HubSpot Contacts Search API query supporting search, lifecycle stage, date range, and sorting.
+ * Server-side paginated HubSpot Contacts Search API query supporting search, lifecycle stage, record source, date range, and sorting.
  */
-async function searchContactsInHubSpot(token, { page = 1, limit = 10, search = '', stage = 'ALL', sort = 'newest', startDate = '', endDate = '' }) {
+async function searchContactsInHubSpot(token, { page = 1, limit = 10, search = '', stage = 'ALL', recordSources = [], recordSourceOp = 'IN', sort = 'newest', startDate = '', endDate = '' }) {
     const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
     const filters = [];
     if (stage && stage !== 'ALL') {
         filters.push({ propertyName: 'lifecyclestage', operator: 'EQ', value: stage });
+    }
+    if (Array.isArray(recordSources) && recordSources.length > 0) {
+        const op = recordSourceOp === 'NOT_IN' ? 'NOT_IN' : 'IN';
+        filters.push({
+            propertyName: 'hs_object_source_label',
+            operator: op,
+            values: recordSources
+        });
     }
     if (startDate) {
         const startMs = new Date(startDate).getTime();
@@ -240,7 +287,7 @@ async function searchContactsInHubSpot(token, { page = 1, limit = 10, search = '
 /**
  * Fetches verified portal/website/webhook contacts by batch-reading tracked IDs from HubSpot.
  */
-async function fetchContactsBySourceFromHubSpot(token, sourcesMap, targetSource, { page = 1, limit = 10, search = '', stage = 'ALL', sort = 'newest', startDate = '', endDate = '' }) {
+async function fetchContactsBySourceFromHubSpot(token, sourcesMap, targetSource, { page = 1, limit = 10, search = '', stage = 'ALL', recordSources = [], recordSourceOp = 'IN', sort = 'newest', startDate = '', endDate = '' }) {
     const candidateIds = [];
     for (const [id, info] of Object.entries(sourcesMap || {})) {
         if (info?.object_type && info.object_type !== 'contact') continue;
@@ -288,6 +335,11 @@ async function fetchContactsBySourceFromHubSpot(token, sourcesMap, targetSource,
     let filtered = fetched.filter(c => {
         const p = c.properties || {};
         if (stage && stage !== 'ALL' && (p.lifecyclestage || 'lead') !== stage) return false;
+        if (Array.isArray(recordSources) && recordSources.length > 0) {
+            const rawSrc = String(p.hs_object_source_label || p.hs_object_source || '').toUpperCase();
+            const isMatch = recordSources.includes(rawSrc);
+            if (recordSourceOp === 'NOT_IN' ? isMatch : !isMatch) return false;
+        }
         if (startMs && (!p.createdate || new Date(p.createdate).getTime() < startMs)) return false;
         if (endMs && (!p.createdate || new Date(p.createdate).getTime() > endMs)) return false;
         if (q) {
@@ -427,12 +479,17 @@ export default async function handler(req, res) {
             }
 
             const q = req.query || {};
-            const hasExplicitPagination = q.page !== undefined || q.limit !== undefined || q.search !== undefined || q.stage !== undefined || q.source !== undefined || q.sort !== undefined;
+            const hasExplicitPagination = q.page !== undefined || q.limit !== undefined || q.search !== undefined || q.stage !== undefined || q.source !== undefined || q.sort !== undefined || q.recordSource !== undefined;
             const page = Math.max(parseInt(q.page, 10) || 1, 1);
             const limit = Math.min(Math.max(parseInt(q.limit, 10) || (hasExplicitPagination ? 10 : 50), 1), 100);
             const search = String(q.search || '').trim();
             const stage = String(q.stage || 'ALL').trim();
             const source = String(q.source || 'ALL').trim();
+            const rawRecordSourceParam = String(q.recordSource || '').trim();
+            const recordSources = rawRecordSourceParam
+                ? rawRecordSourceParam.split(',').map(s => s.trim().toUpperCase()).filter(Boolean)
+                : [];
+            const recordSourceOp = String(q.recordSourceOp || 'IN').trim().toUpperCase() === 'NOT_IN' ? 'NOT_IN' : 'IN';
             const sort = String(q.sort || 'newest').trim();
             const startDate = String(q.startDate || '').trim();
             const endDate = String(q.endDate || '').trim();
@@ -443,7 +500,7 @@ export default async function handler(req, res) {
                 invalidateContactsCache();
             }
 
-            const cacheKey = JSON.stringify({ page, limit, search, stage, source, sort, startDate, endDate, includeStats });
+            const cacheKey = JSON.stringify({ page, limit, search, stage, source, recordSources, recordSourceOp, sort, startDate, endDate, includeStats });
             const now = Date.now();
             const cachedEntry = contactsQueryCache.get(cacheKey);
             if (cachedEntry && (now - cachedEntry.time < CONTACTS_CACHE_TTL_MS)) {
@@ -452,16 +509,16 @@ export default async function handler(req, res) {
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const isUnfiltered = !search && stage === 'ALL' && source === 'ALL' && !startDate && !endDate;
+            const isUnfiltered = !search && stage === 'ALL' && source === 'ALL' && recordSources.length === 0 && !startDate && !endDate;
 
             let queryData;
             if (source === 'Bridge Portal' || source === 'Website Form' || source === 'HubSpot Webhook') {
                 queryData = await fetchContactsBySourceFromHubSpot(token, sourcesMap, source, {
-                    page, limit, search, stage, sort, startDate, endDate
+                    page, limit, search, stage, recordSources, recordSourceOp, sort, startDate, endDate
                 });
             } else {
                 queryData = await searchContactsInHubSpot(token, {
-                    page, limit, search, stage, sort, startDate, endDate
+                    page, limit, search, stage, recordSources, recordSourceOp, sort, startDate, endDate
                 });
             }
 
