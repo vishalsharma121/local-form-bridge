@@ -47,6 +47,7 @@ export default function TeamMembersView() {
   const [successMsg, setSuccessMsg] = useState('');
   const [copiedEmailId, setCopiedEmailId] = useState(null);
   const [isSyncingNotes, setIsSyncingNotes] = useState(false);
+  const [isSyncingHandlers, setIsSyncingHandlers] = useState(false);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -153,6 +154,24 @@ export default function TeamMembersView() {
       setError(err.message || 'Failed to sync HubSpot creator notes.');
     } finally {
       setIsSyncingNotes(false);
+    }
+  };
+
+  const handleSyncHandlers = async () => {
+    setIsSyncingHandlers(true);
+    setError('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch('/api/users?action=sync-handlers', {
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to sync Deal Handled By options to HubSpot.');
+      setSuccessMsg(data.message || 'Successfully synced team members to HubSpot "Deal Handled By" dropdown!');
+    } catch (err) {
+      setError(err.message || 'Failed to sync Deal Handled By options to HubSpot.');
+    } finally {
+      setIsSyncingHandlers(false);
     }
   };
 
@@ -652,7 +671,17 @@ export default function TeamMembersView() {
         </div>
 
         {isSuperAdmin && (
-          <div className="flex items-center gap-2 self-start md:self-auto">
+          <div className="flex flex-wrap items-center gap-2 self-start md:self-auto">
+            <button
+              onClick={handleSyncHandlers}
+              disabled={isSyncingHandlers}
+              className="px-4 py-2.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 text-xs font-extrabold transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              title="Sync active team members to HubSpot's Deal Handled By dropdown property"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingHandlers ? 'animate-spin' : ''}`} />
+              <span>{isSyncingHandlers ? 'Syncing Handlers...' : 'Sync Deal Handlers to HubSpot'}</span>
+            </button>
+
             <button
               onClick={handleSyncNotes}
               disabled={isSyncingNotes}

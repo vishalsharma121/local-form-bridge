@@ -10,6 +10,7 @@ import {
     updateUserPermissions
 } from '../lib/userAuth.js';
 import { syncHubSpotNotesForUser } from '../lib/hubspotOwners.js';
+import { syncTeamMembersToHubSpotDealProperty } from '../lib/hubspotDealHandlers.js';
 import { can } from '../lib/permissions.js';
 
 export default async function handler(req, res) {
@@ -39,6 +40,21 @@ export default async function handler(req, res) {
                 return res.status(200).json({ success: true, message: `Synced ${totalUpdated} note(s) in HubSpot CRM.` });
             }
 
+            if (req.query?.action === 'sync-handlers') {
+                const users = await listUsers();
+                const syncResult = await syncTeamMembersToHubSpotDealProperty(users);
+                if (!syncResult.synced) {
+                    return res.status(500).json({
+                        success: false,
+                        error: syncResult.error || 'Failed to sync Deal Handled By options to HubSpot.'
+                    });
+                }
+                return res.status(200).json({
+                    success: true,
+                    message: `Synced ${syncResult.activeCount} active team member(s) to HubSpot "Deal Handled By" dropdown.`
+                });
+            }
+
             const users = await listUsers();
             return res.status(200).json({ users });
         } catch (err) {
@@ -66,6 +82,11 @@ export default async function handler(req, res) {
             if (!result.success) {
                 return res.status(400).json({ error: result.error });
             }
+
+            // Automatically add new team member to HubSpot "Deal Handled By" dropdown
+            syncTeamMembersToHubSpotDealProperty().catch(err =>
+                console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after create:', err.message)
+            );
 
             return res.status(201).json({ success: true, user: result.user });
         } catch (err) {
@@ -142,6 +163,14 @@ export default async function handler(req, res) {
             }
 
             const users = await listUsers();
+
+            // Automatically sync label rename or active/inactive status to HubSpot "Deal Handled By" dropdown
+            if (name || typeof is_active === 'boolean') {
+                syncTeamMembersToHubSpotDealProperty(users).catch(err =>
+                    console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after update:', err.message)
+                );
+            }
+
             return res.status(200).json({ 
                 success: true, 
                 updated: Boolean(updated),
@@ -173,6 +202,12 @@ export default async function handler(req, res) {
             }
 
             const users = await listUsers();
+
+            // Mark deleted team member option as hidden in HubSpot (preserves historical deals)
+            syncTeamMembersToHubSpotDealProperty(users).catch(err =>
+                console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after delete:', err.message)
+            );
+
             return res.status(200).json({ success: true, users });
         } catch (err) {
             console.error('🔥 [API/Users] Failed to delete user:', err);

@@ -239,10 +239,13 @@ export default function DealsView({
     );
   };
 
-  // Assign deal to a team member
+  const [assignStatusMsg, setAssignStatusMsg] = useState(null); // { type: 'success' | 'error', text: string }
+
+  // Assign deal to a team member (Two-Way Sync with HubSpot `deal_handled_by`)
   const handleAssignDeal = async (dealId, member) => {
     try {
       setIsAssigning(true);
+      setAssignStatusMsg(null);
       const res = await fetch('/api/deals', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -254,22 +257,37 @@ export default function DealsView({
           assignedUserEmail: member ? member.email : null
         })
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setAssignDropdownOpenDealId(null);
+        setAssignStatusMsg({
+          type: 'success',
+          text: member
+            ? `Assigned deal to ${member.name} & synced to HubSpot CRM.`
+            : 'Cleared deal handler & synced to HubSpot CRM.'
+        });
+        setTimeout(() => setAssignStatusMsg(null), 3500);
         if (onRefreshDeals) onRefreshDeals();
+      } else {
+        setAssignStatusMsg({
+          type: 'error',
+          text: data.error || 'Failed to sync deal assignment to HubSpot.'
+        });
       }
     } catch (err) {
       console.error('Failed to assign deal:', err);
+      setAssignStatusMsg({ type: 'error', text: err.message || 'Network error while assigning deal.' });
     } finally {
       setIsAssigning(false);
     }
   };
 
-  // Bulk assign selected deals to a team member
+  // Bulk assign selected deals to a team member (Two-Way Sync with HubSpot `deal_handled_by`)
   const handleBulkAssign = async (member) => {
     if (selectedDealIds.length === 0) return;
     try {
       setIsAssigning(true);
+      setAssignStatusMsg(null);
       const res = await fetch('/api/deals', {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -281,12 +299,27 @@ export default function DealsView({
           assignedUserEmail: member ? member.email : null
         })
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
+        const count = selectedDealIds.length;
         setSelectedDealIds([]);
+        setAssignStatusMsg({
+          type: 'success',
+          text: member
+            ? `Assigned ${count} deal(s) to ${member.name} & synced to HubSpot CRM.`
+            : `Cleared handler on ${count} deal(s) & synced to HubSpot CRM.`
+        });
+        setTimeout(() => setAssignStatusMsg(null), 3500);
         if (onRefreshDeals) onRefreshDeals();
+      } else {
+        setAssignStatusMsg({
+          type: 'error',
+          text: data.error || 'Failed to bulk sync deal assignments to HubSpot.'
+        });
       }
     } catch (err) {
       console.error('Failed to bulk assign deals:', err);
+      setAssignStatusMsg({ type: 'error', text: err.message || 'Network error while bulk assigning deals.' });
     } finally {
       setIsAssigning(false);
     }
@@ -360,6 +393,10 @@ export default function DealsView({
     setActionSuccess('');
 
     try {
+      const selectedMemberObj = editDealData.assigned_user_id
+        ? teamMembers.find(m => String(m.id) === String(editDealData.assigned_user_id))
+        : null;
+
       const res = await fetch('/api/deals', {
         method: 'PUT',
         headers: getAuthHeaders(),
@@ -372,7 +409,8 @@ export default function DealsView({
           closedate: editDealData.closedate || '',
           hubspot_owner_id: editDealData.hubspot_owner_id || '',
           assigned_user_id: editDealData.assigned_user_id || null,
-          assigned_to: editDealData.assigned_to || null,
+          assigned_to: editDealData.assigned_to || selectedMemberObj?.name || null,
+          assigned_user_email: selectedMemberObj?.email || null,
           dealtype: editDealData.dealtype || '',
           hs_priority: editDealData.hs_priority || ''
         })
@@ -1047,6 +1085,33 @@ export default function DealsView({
         </div>
       </div>
 
+      {/* Deal Assignment Sync Feedback Banner */}
+      {assignStatusMsg && (
+        <div
+          className={`px-4 py-2.5 rounded-2xl border text-xs font-bold flex items-center justify-between gap-2 animate-fade-in shrink-0 ${
+            assignStatusMsg.type === 'error'
+              ? 'bg-rose-50 border-rose-200 text-rose-800'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {assignStatusMsg.type === 'error' ? (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            )}
+            <span>{assignStatusMsg.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setAssignStatusMsg(null)}
+            className="p-1 rounded-lg hover:bg-black/5 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Bulk Assignment Bar */}
       {isSuperAdmin && selectedDealIds.length > 0 && (
         <div className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 py-2.5 rounded-2xl shadow-lg flex flex-wrap items-center justify-between gap-3 animate-fade-in text-xs font-semibold shrink-0">
@@ -1061,8 +1126,12 @@ export default function DealsView({
             <select
               onChange={(e) => {
                 if (!e.target.value) return;
-                const member = teamMembers.find(m => String(m.id) === String(e.target.value));
-                handleBulkAssign(member || null);
+                if (e.target.value === '__CLEAR__') {
+                  handleBulkAssign(null);
+                } else {
+                  const member = teamMembers.find(m => String(m.id) === String(e.target.value));
+                  handleBulkAssign(member || null);
+                }
                 e.target.value = '';
               }}
               disabled={isAssigning}
@@ -1074,6 +1143,7 @@ export default function DealsView({
                   {m.name} ({m.email})
                 </option>
               ))}
+              <option value="__CLEAR__">-- Clear Handler (Unassign) --</option>
             </select>
             <button
               type="button"

@@ -156,13 +156,14 @@ function AdminDashboardContent() {
     return null;
   }, [getAuthHeaders, logout, can]);
 
-  const loadDeals = useCallback(async () => {
+  const loadDeals = useCallback(async (forceRefresh = false) => {
     if (!can('view', 'deals')) {
       setDeals([]);
       return null;
     }
     try {
-      const res = await fetch('/api/deals', {
+      const url = forceRefresh ? '/api/deals?refresh=true' : '/api/deals';
+      const res = await fetch(url, {
         headers: getAuthHeaders(),
       });
       if (res.status === 401) {
@@ -295,7 +296,7 @@ function AdminDashboardContent() {
       await Promise.allSettled([
         loadContacts(silent),
         loadCompanies(),
-        loadDeals(),
+        loadDeals(!silent || forceReconcile),
         loadErrorLogs(),
         loadActivityLogs(forceReconcile)
       ]);
@@ -503,7 +504,7 @@ function AdminDashboardContent() {
                 setSelectedContact={setSelectedContact}
                 onRefreshContacts={() => loadContacts(false)}
                 onRefreshCompanies={() => loadCompanies()}
-                onRefreshDeals={() => loadDeals()}
+                onRefreshDeals={() => loadDeals(true)}
               />
             ) : (
               <AccessRestrictedView
@@ -540,7 +541,7 @@ function AdminDashboardContent() {
                 error={error}
                 contacts={contacts}
                 companies={companies}
-                onRefreshDeals={() => loadDeals()}
+                onRefreshDeals={() => loadDeals(true)}
                 onRefreshContacts={() => loadContacts(false)}
                 onRefreshCompanies={() => loadCompanies()}
               />

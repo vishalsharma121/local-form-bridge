@@ -2,9 +2,16 @@ import { getHubSpotToken, MISSING_TOKEN_ERROR } from '../lib/hubspot.js';
 import { getLeadSourcesMap, recordLeadSource, assignDeal } from '../lib/leadSourceTracker.js';
 import { logSyncError } from '../lib/errorLogger.js';
 import { logSyncActivity } from '../lib/activityLogger.js';
-import { authenticateRequest } from '../lib/userAuth.js';
+import { authenticateRequest, listUsers } from '../lib/userAuth.js';
 import { can, formatRole } from '../lib/permissions.js';
 import { getHubSpotOwnerIdByEmail, createHubSpotNote } from '../lib/hubspotOwners.js';
+import {
+    HUBSPOT_HANDLER_PROPERTY,
+    getHandlerOptionValue,
+    ensureHandlerOptionInHubSpot,
+    updateHubSpotDealHandlers,
+    resolveDealHandlerFromHubSpot
+} from '../lib/hubspotDealHandlers.js';
 
 let cachedPipelines = null;
 let lastPipelinesCheckTime = 0;
@@ -27,7 +34,7 @@ async function fetchAllDealsFromHubSpot(token) {
     const properties = [
         'dealname', 'pipeline', 'dealstage', 'amount', 'closedate',
         'hubspot_owner_id', 'dealtype', 'hs_priority', 'lead_source',
-        'description', 'createdate'
+        'description', 'createdate', HUBSPOT_HANDLER_PROPERTY
     ];
 
     const initialRes = await fetch('https://api.hubapi.com/crm/v3/objects/deals/search', {
@@ -101,6 +108,10 @@ export default async function handler(req, res) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
+            if (req.query?.refresh === 'true') {
+                invalidateDealsCache();
+            }
+
             const nowDeals = Date.now();
             let rawDealsData = null;
             if (dealsCache && (nowDeals - dealsCacheTime < DEALS_CACHE_TTL_MS)) {
@@ -111,16 +122,34 @@ export default async function handler(req, res) {
                 dealsCacheTime = nowDeals;
             }
 
-            const sourcesMap = await getLeadSourcesMap();
+            const [sourcesMap, allUsers] = await Promise.all([
+                getLeadSourcesMap(),
+                listUsers().catch(() => [])
+            ]);
+
+            const usersById = {};
+            const usersByEmail = {};
+            const usersByName = {};
+            for (const u of (allUsers || [])) {
+                if (u.id) usersById[Number(u.id)] = u;
+                if (u.email) usersByEmail[u.email.toLowerCase().trim()] = u;
+                if (u.name) usersByName[u.name.toLowerCase().trim()] = u;
+            }
 
             const deals = (rawDealsData.results || []).map((d) => {
                 const srcInfo = sourcesMap[String(d.id)];
                 const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
                 const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
                 const creatorEmail = typeof srcInfo === 'object' ? srcInfo?.created_by_email : null;
-                const assignedTo = srcInfo?.assigned_to || null;
-                const assignedUserId = srcInfo?.assigned_user_id ? Number(srcInfo.assigned_user_id) : null;
-                const assignedUserEmail = srcInfo?.assigned_user_email || null;
+                const resolvedHandler = resolveDealHandlerFromHubSpot(
+                    d.properties[HUBSPOT_HANDLER_PROPERTY],
+                    usersById,
+                    usersByEmail,
+                    usersByName
+                );
+                const assignedTo = resolvedHandler.assigned_to;
+                const assignedUserId = resolvedHandler.assigned_user_id;
+                const assignedUserEmail = resolvedHandler.assigned_user_email;
                 const assignedAt = srcInfo?.assigned_at || null;
                 const assignedBy = srcInfo?.assigned_by || null;
                 const description = d.properties.description || '';
@@ -258,7 +287,7 @@ export default async function handler(req, res) {
                 return res.status(401).json({ error: 'Unauthorized' });
             }
 
-            // Action: Assign Deal(s) to a team member
+            // Action: Assign Deal(s) to a team member (Two-Way Sync with HubSpot `deal_handled_by`)
             if (req.body?.action === 'assign') {
                 const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
                 if (!isSuperAdmin) {
@@ -272,22 +301,46 @@ export default async function handler(req, res) {
                     return res.status(400).json({ error: 'Please provide at least one deal ID to assign.' });
                 }
 
-                for (const id of targetIds) {
-                    await assignDeal(id, assignedUserId, assignedTo, assignedUserEmail, auth.user?.name || 'Admin User');
+                // 1. Write `deal_handled_by` directly to HubSpot CRM (single or batch)
+                const hsSync = await updateHubSpotDealHandlers(targetIds, assignedUserId || null);
+                if (!hsSync.success) {
+                    return res.status(hsSync.status || 502).json({
+                        error: `Failed to sync "Deal Handled By" to HubSpot CRM: ${hsSync.error}`
+                    });
                 }
+
+                // 2. Mirror assignment metadata to Neon Postgres audit table
+                for (const id of targetIds) {
+                    await assignDeal(
+                        id,
+                        assignedUserId || null,
+                        assignedTo || null,
+                        assignedUserEmail || null,
+                        auth.user?.name || 'Admin User'
+                    );
+                }
+
+                const actionLabel = assignedUserId
+                    ? `Assigned ${targetIds.length} deal(s) to ${assignedTo || 'team member'} (synced to HubSpot)`
+                    : `Cleared handler on ${targetIds.length} deal(s) (synced to HubSpot)`;
 
                 await logSyncActivity({
                     type: 'deal',
-                    operation: 'UPDATE',
-                    entityId: String(targetIds[0]),
-                    message: `Assigned ${targetIds.length} deal(s) to ${assignedTo || 'team member'} by ${auth.user?.name || 'Admin'}`,
-                    status: 'SUCCESS',
-                    statusCode: 200,
-                    performedBy: auth.user?.name || 'Admin User'
+                    operation: 'update',
+                    entityInfo: { dealIds: targetIds, assignedTo: assignedTo || null },
+                    user: auth.user,
+                    message: `${actionLabel} by ${auth.user?.name || 'Admin'}`,
+                    status: 'success',
+                    statusCode: 200
                 });
 
                 invalidateDealsCache();
-                return res.status(200).json({ success: true, count: targetIds.length, assignedTo });
+                return res.status(200).json({
+                    success: true,
+                    count: targetIds.length,
+                    assignedTo: assignedTo || null,
+                    hubspotValue: hsSync.value
+                });
             }
 
             if (!can(auth.user, 'create', 'deals')) {
@@ -301,6 +354,9 @@ export default async function handler(req, res) {
                 amount,
                 closedate,
                 hubspot_owner_id,
+                assigned_user_id,
+                assigned_to,
+                assigned_user_email,
                 dealtype,
                 hs_priority,
                 contactId,
@@ -382,6 +438,21 @@ export default async function handler(req, res) {
                 properties.hs_priority = String(hs_priority).trim();
             }
 
+            // Set HubSpot `deal_handled_by` on newly created deals
+            const isCreatorAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
+            const creatorUid = auth.user?.userId || auth.user?.id || null;
+            const finalAssignedUserId = assigned_user_id ? Number(assigned_user_id) : (!isCreatorAdmin && creatorUid ? Number(creatorUid) : null);
+            const finalAssignedTo = assigned_user_id ? (assigned_to || null) : (!isCreatorAdmin ? userName : null);
+            const finalAssignedEmail = assigned_user_id ? (assigned_user_email || null) : (!isCreatorAdmin ? userEmail : null);
+
+            if (finalAssignedUserId) {
+                const optVal = getHandlerOptionValue(finalAssignedUserId);
+                if (optVal) {
+                    await ensureHandlerOptionInHubSpot(finalAssignedUserId);
+                    properties[HUBSPOT_HANDLER_PROPERTY] = optVal;
+                }
+            }
+
             const safeHubSpotFetch = async (url, opts) => {
                 let res = await fetch(url, opts);
                 if (!res.ok && res.status === 400) {
@@ -454,6 +525,9 @@ export default async function handler(req, res) {
             const dealId = dealData.id;
             console.log(`✅ [API] Deal created with ID: ${dealId}`);
             await recordLeadSource(dealId, 'deal', 'Admin Dashboard', userName, auth.user?.userId, auth.user?.email);
+            if (finalAssignedUserId) {
+                await assignDeal(dealId, finalAssignedUserId, finalAssignedTo, finalAssignedEmail, userName);
+            }
 
             // Attach creator Note in HubSpot
             const noteContent = `📌 Deal Created via Local Form Bridge\n• Created By: ${userName} (${userEmail})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: Admin Dashboard\n• Timestamp: ${new Date().toLocaleString()}`;
@@ -541,6 +615,25 @@ export default async function handler(req, res) {
                 return res.status(400).json({ error: 'Deal ID is required for updating.' });
             }
 
+            const token = getHubSpotToken();
+            if (!token) {
+                return res.status(500).json({ error: MISSING_TOKEN_ERROR });
+            }
+
+            let oldRecord = {};
+            try {
+                const getOldRes = await fetch(
+                    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=dealname,pipeline,dealstage,amount,closedate,hubspot_owner_id,dealtype,hs_priority,${HUBSPOT_HANDLER_PROPERTY}`,
+                    { headers: { Authorization: `Bearer ${token}` } }
+                );
+                if (getOldRes.ok) {
+                    const getOldData = await getOldRes.json();
+                    oldRecord = getOldData.properties || {};
+                }
+            } catch (fetchErr) {
+                console.warn('⚠️ [API] Could not fetch old deal record:', fetchErr.message);
+            }
+
             const isSuperAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
             if (!isSuperAdmin) {
                 const userEmail = (auth.user?.email || '').toLowerCase().trim();
@@ -548,7 +641,19 @@ export default async function handler(req, res) {
                 const userName = (auth.user?.name || '').toLowerCase().trim();
                 const sourcesMap = await getLeadSourcesMap();
                 const srcInfo = sourcesMap[String(dealId)];
-                const isOwner = (srcInfo?.created_by_user_id && Number(srcInfo.created_by_user_id) === userId) ||
+
+                const hsHandlerRaw = String(oldRecord[HUBSPOT_HANDLER_PROPERTY] || '').trim().toLowerCase();
+                const expectedOptVal = getHandlerOptionValue(userId).toLowerCase();
+                const isHubSpotAssigned = Boolean(
+                    hsHandlerRaw && (
+                        (expectedOptVal && hsHandlerRaw === expectedOptVal) ||
+                        (userEmail && hsHandlerRaw === userEmail) ||
+                        (userName && hsHandlerRaw === userName)
+                    )
+                );
+
+                const isOwner = isHubSpotAssigned ||
+                                (srcInfo?.created_by_user_id && Number(srcInfo.created_by_user_id) === userId) ||
                                 (srcInfo?.created_by_email && srcInfo.created_by_email.toLowerCase().trim() === userEmail) ||
                                 (srcInfo?.assigned_user_id && Number(srcInfo.assigned_user_id) === userId) ||
                                 (srcInfo?.assigned_user_email && srcInfo.assigned_user_email.toLowerCase().trim() === userEmail) ||
@@ -556,22 +661,12 @@ export default async function handler(req, res) {
                 if (!isOwner) {
                     return res.status(403).json({ error: 'Permission denied. Team members can only update deals assigned to them or created by them.' });
                 }
-            } else {
-                // If manager updates assigned_user_id or assigned_to
-                if (req.body?.assigned_user_id !== undefined || req.body?.assigned_to !== undefined) {
-                    await assignDeal(dealId, req.body.assigned_user_id, req.body.assigned_to, req.body.assigned_user_email, auth.user?.name || 'Admin User');
-                }
-            }
-
-            const token = getHubSpotToken();
-            if (!token) {
-                return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
             const properties = {};
             if (dealname !== undefined) properties.dealname = dealname.trim();
             if (pipeline !== undefined) properties.pipeline = pipeline.trim() || 'default';
-            if (dealstage !== undefined) properties.dealstage = dealstage.trim().toLowerCase();
+            if (dealstage !== undefined) properties.dealstage = dealstage.trim();
             if (amount !== undefined) {
                 const cleaned = String(amount).replace(/[^0-9.]/g, '');
                 const num = parseFloat(cleaned);
@@ -599,18 +694,21 @@ export default async function handler(req, res) {
                 properties.hs_priority = String(hs_priority || '').trim();
             }
 
-            let oldRecord = {};
-            try {
-                const getOldRes = await fetch(
-                    `https://api.hubapi.com/crm/v3/objects/deals/${dealId}?properties=dealname,pipeline,dealstage,amount,closedate,hubspot_owner_id,dealtype,hs_priority`,
-                    { headers: { Authorization: `Bearer ${token}` } }
-                );
-                if (getOldRes.ok) {
-                    const getOldData = await getOldRes.json();
-                    oldRecord = getOldData.properties || {};
+            if (isSuperAdmin && (req.body?.assigned_user_id !== undefined || req.body?.assigned_to !== undefined)) {
+                const nextHandlerId = req.body.assigned_user_id ? Number(req.body.assigned_user_id) : null;
+                if (nextHandlerId) {
+                    await ensureHandlerOptionInHubSpot(nextHandlerId);
+                    properties[HUBSPOT_HANDLER_PROPERTY] = getHandlerOptionValue(nextHandlerId);
+                } else {
+                    properties[HUBSPOT_HANDLER_PROPERTY] = '';
                 }
-            } catch (fetchErr) {
-                console.warn('⚠️ [API] Could not fetch old deal record:', fetchErr.message);
+                await assignDeal(
+                    dealId,
+                    nextHandlerId,
+                    req.body.assigned_to || null,
+                    req.body.assigned_user_email || null,
+                    auth.user?.name || 'Admin User'
+                );
             }
 
             const diffParts = [];
