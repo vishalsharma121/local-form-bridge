@@ -95,7 +95,8 @@ export default function OverviewView({
   onSelectContact,
   totalContactsCount,
   totalCompaniesCount,
-  totalDealsCount
+  totalDealsCount,
+  contactStats
 }) {
   const { can } = useAuth() || {};
   const canViewContacts = can ? can('view', 'contacts') : true;
@@ -108,7 +109,7 @@ export default function OverviewView({
   const [activeRightTab, setActiveRightTab] = useState('contacts');
 
   // Analytics Metrics
-  const totalContacts = totalContactsCount !== null && totalContactsCount !== undefined ? totalContactsCount : contacts.length;
+  const totalContacts = contactStats?.total ?? (totalContactsCount !== null && totalContactsCount !== undefined ? totalContactsCount : contacts.length);
   const totalCompanies = totalCompaniesCount !== null && totalCompaniesCount !== undefined ? totalCompaniesCount : companies.length;
   const totalDeals = totalDealsCount !== null && totalDealsCount !== undefined ? totalDealsCount : deals.length;
   const totalSyncFailures = errorLogs.filter(log => !log.resolved).length;
@@ -122,18 +123,29 @@ export default function OverviewView({
     }, 0);
   }, [deals]);
 
-  // Today's Contacts count
+  // Today's Contacts count (prefers exact CRM-wide count from HubSpot Search API)
   const todayStr = new Date().toISOString().split('T')[0];
   const todayContactsCount = useMemo(() => {
+    if (contactStats?.todayCount !== undefined && contactStats?.todayCount !== null) {
+      return contactStats.todayCount;
+    }
     return contacts.filter(c => {
       if (!c.createdate) return false;
       const dateStr = new Date(c.createdate).toISOString().split('T')[0];
       return dateStr === todayStr;
     }).length;
-  }, [contacts, todayStr]);
+  }, [contacts, todayStr, contactStats]);
 
-  // Lead Source breakdown
+  // Lead Source breakdown (prefers verified CRM-wide channel stats so percentages total 100%)
   const { adminCount, hsCount, webCount } = useMemo(() => {
+    if (contactStats && contactStats.total !== undefined) {
+      return {
+        adminCount: contactStats.adminCount || 0,
+        hsCount: contactStats.hsCount || 0,
+        webCount: contactStats.webCount || 0
+      };
+    }
+
     let admin = 0;
     let hs = 0;
     let web = 0;
@@ -151,7 +163,7 @@ export default function OverviewView({
     }
 
     return { adminCount: admin, hsCount: hs, webCount: web };
-  }, [contacts]);
+  }, [contacts, contactStats]);
 
   const adminPct = totalContacts > 0 ? Math.round((adminCount / totalContacts) * 100) : 0;
   const hsPct = totalContacts > 0 ? Math.round((hsCount / totalContacts) * 100) : 0;
@@ -441,7 +453,7 @@ export default function OverviewView({
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs font-bold text-slate-600">
                     <span>Channel Traffic Share</span>
-                    <span className="text-slate-400 font-medium">{totalContacts} Total Contacts Analyzed</span>
+                    <span className="text-slate-400 font-medium">{totalContacts.toLocaleString()} Total Contacts Analyzed</span>
                   </div>
 
                   <div className="h-3.5 w-full bg-slate-100 rounded-full overflow-hidden flex p-0.5 shadow-inner gap-1 border border-slate-200/70">

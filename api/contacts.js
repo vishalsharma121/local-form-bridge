@@ -23,77 +23,392 @@ function sanitizeAndValidatePhone(rawPhone) {
     return { valid: true, phone: cleaned };
 }
 
-let contactsCache = null;
-let contactsCacheTime = 0;
 const CONTACTS_CACHE_TTL_MS = 120 * 1000; // 2 minutes
+const contactsQueryCache = new Map();
+let contactStatsCache = null;
+let contactStatsCacheTime = 0;
 
 function invalidateContactsCache() {
-    contactsCache = null;
-    contactsCacheTime = 0;
+    contactsQueryCache.clear();
+    contactStatsCache = null;
+    contactStatsCacheTime = 0;
 }
 
-/**
- * Concurrently fetches recent contacts from HubSpot using Search API sorted newest first,
- * and retrieves the exact CRM total count.
- */
-async function fetchContactsFromHubSpot(token) {
-    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-    const properties = [
-        'firstname', 'lastname', 'email', 'phone', 'jobtitle',
-        'hubspot_owner_id', 'lifecyclestage', 'hs_lead_status',
-        'subject', 'message', 'lead_source', 'createdate'
-    ];
+const CONTACT_PROPERTIES = [
+    'firstname', 'lastname', 'email', 'phone', 'jobtitle',
+    'hubspot_owner_id', 'lifecyclestage', 'hs_lead_status',
+    'subject', 'message', 'lead_source', 'createdate'
+];
 
-    const initialRes = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-            limit: 100,
-            after: 0,
-            sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
-            properties
-        })
-    });
+function getNormalizedContactSource(srcInfo, rawPropSource = '') {
+    const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
+    const creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+    const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
 
-    const initialData = await initialRes.json();
-    if (!initialRes.ok) {
-        throw new Error(initialData.message || `HubSpot API error ${initialRes.status}`);
+    if (creatorUserId || srcName === 'Admin Dashboard' || srcName === 'Bridge Portal') {
+        return 'Bridge Portal';
+    }
+    if (creator === 'Public Lead Form' || srcName === 'Website Form' || (srcName || '').toLowerCase().includes('website')) {
+        return 'Website Form';
+    }
+    if ((srcName || '').toLowerCase().includes('webhook') || (rawPropSource || '').toLowerCase().includes('webhook')) {
+        return 'HubSpot Webhook';
+    }
+    return 'HubSpot Direct';
+}
+
+function formatContactRecord(c, sourcesMap, companyAssocMap = {}, dealAssocMap = {}) {
+    const props = c.properties || {};
+    const fn = props.firstname || '';
+    const ln = (props.lastname === '-' ? '' : props.lastname) || '';
+    const srcInfo = sourcesMap[String(c.id)];
+    const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
+    let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+
+    const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
+    const isPortalContact = Boolean(
+        creatorUserId ||
+        srcName === 'Admin Dashboard' ||
+        srcName === 'Bridge Portal'
+    );
+
+    let leadSource = 'HubSpot Direct';
+    if (isPortalContact) {
+        leadSource = 'Admin Dashboard';
+    } else if (creator === 'Public Lead Form' || srcName === 'Website Form' || (srcName || '').toLowerCase().includes('website')) {
+        leadSource = 'Website Form';
+    } else if ((srcName || '').toLowerCase().includes('webhook') || (props.lead_source || '').toLowerCase().includes('webhook')) {
+        leadSource = 'HubSpot Webhook';
+    } else if (srcName === 'HubSpot CRM' || srcName === 'HubSpot Direct' || props.lead_source) {
+        leadSource = srcName || props.lead_source || 'HubSpot Direct';
     }
 
-    const total = initialData.total || (initialData.results || []).length;
-    let allResults = [...(initialData.results || [])];
-
-    if (total > 100) {
-        const nextOffsets = [100, 200].filter(off => off < total);
-        const additionalPages = await Promise.all(
-            nextOffsets.map(offset =>
-                fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                        limit: 100,
-                        after: offset,
-                        sorts: [{ propertyName: 'createdate', direction: 'DESCENDING' }],
-                        properties
-                    })
-                }).then(r => r.json()).catch(() => ({ results: [] }))
-            )
-        );
-
-        for (const page of additionalPages) {
-            if (Array.isArray(page.results)) {
-                allResults.push(...page.results);
-            }
+    if (!creator) {
+        if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
+            creator = 'Public Lead Form';
+        } else if (leadSource === 'Admin Dashboard' || leadSource.toLowerCase().includes('admin')) {
+            creator = 'Admin User';
+        } else {
+            creator = 'HubSpot CRM';
         }
     }
 
-    return { results: allResults, total };
+    const assocCompIds = companyAssocMap[String(c.id)] || (c.associations?.companies?.results || []).map(r => String(r.id));
+    const assocDealIds = dealAssocMap[String(c.id)] || (c.associations?.deals?.results || []).map(r => String(r.id));
+
+    return {
+        id: c.id,
+        firstname: fn,
+        lastname: ln,
+        name: `${fn} ${ln}`.trim() || 'Lead',
+        email: props.email || '',
+        phone: props.phone || '',
+        jobtitle: props.jobtitle || '',
+        hubspot_owner_id: props.hubspot_owner_id || '',
+        lifecyclestage: props.lifecyclestage || 'lead',
+        hs_lead_status: props.hs_lead_status || '',
+        associatedCompanyIds: assocCompIds,
+        associatedDealIds: assocDealIds,
+        subject: props.subject || '',
+        message: props.message || '',
+        lead_source: leadSource,
+        created_by: creator,
+        created_by_user_id: creatorUserId || null,
+        createdate: props.createdate,
+    };
+}
+
+/**
+ * Hydrates associated company & deal IDs for the visible page of contacts (fast single batch call).
+ */
+async function hydrateContactAssociations(contactIds, token) {
+    const companyAssocMap = {};
+    const dealAssocMap = {};
+    if (!contactIds || contactIds.length === 0) return { companyAssocMap, dealAssocMap };
+
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const inputs = contactIds.slice(0, 100).map(id => ({ id: String(id) }));
+
+    try {
+        const [compRes, dealRes] = await Promise.all([
+            fetch('https://api.hubapi.com/crm/v3/associations/contacts/companies/batch/read', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ inputs })
+            }).then(r => r.json()).catch(() => ({ results: [] })),
+            fetch('https://api.hubapi.com/crm/v3/associations/contacts/deals/batch/read', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ inputs })
+            }).then(r => r.json()).catch(() => ({ results: [] }))
+        ]);
+
+        for (const item of (compRes.results || [])) {
+            const fromId = String(item.from?.id || '');
+            if (fromId) {
+                companyAssocMap[fromId] = (item.to || []).map(t => String(t.id));
+            }
+        }
+        for (const item of (dealRes.results || [])) {
+            const fromId = String(item.from?.id || '');
+            if (fromId) {
+                dealAssocMap[fromId] = (item.to || []).map(t => String(t.id));
+            }
+        }
+    } catch {
+        // Non-blocking fallback
+    }
+
+    return { companyAssocMap, dealAssocMap };
+}
+
+/**
+ * Server-side paginated HubSpot Contacts Search API query supporting search, lifecycle stage, date range, and sorting.
+ */
+async function searchContactsInHubSpot(token, { page = 1, limit = 10, search = '', stage = 'ALL', sort = 'newest', startDate = '', endDate = '' }) {
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+    const filters = [];
+    if (stage && stage !== 'ALL') {
+        filters.push({ propertyName: 'lifecyclestage', operator: 'EQ', value: stage });
+    }
+    if (startDate) {
+        const startMs = new Date(startDate).getTime();
+        if (!isNaN(startMs)) {
+            filters.push({ propertyName: 'createdate', operator: 'GTE', value: String(startMs) });
+        }
+    }
+    if (endDate) {
+        const endDateObj = new Date(endDate);
+        if (!isNaN(endDateObj.getTime())) {
+            // If YYYY-MM-DD, include entire day up to 23:59:59.999
+            if (/^\d{4}-\d{2}-\d{2}$/.test(String(endDate).trim())) {
+                endDateObj.setHours(23, 59, 59, 999);
+            }
+            filters.push({ propertyName: 'createdate', operator: 'LTE', value: String(endDateObj.getTime()) });
+        }
+    }
+
+    let sorts = [{ propertyName: 'createdate', direction: 'DESCENDING' }];
+    if (sort === 'oldest') {
+        sorts = [{ propertyName: 'createdate', direction: 'ASCENDING' }];
+    } else if (sort === 'name') {
+        sorts = [{ propertyName: 'firstname', direction: 'ASCENDING' }];
+    }
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+    const safePage = Math.max(Number(page) || 1, 1);
+    const offset = (safePage - 1) * safeLimit;
+
+    // HubSpot Search API max offset + limit is 10,000
+    if (offset >= 10000) {
+        return { results: [], total: 0 };
+    }
+
+    const effectiveLimit = Math.min(safeLimit, 10000 - offset);
+    const body = {
+        limit: effectiveLimit,
+        after: offset,
+        sorts,
+        properties: CONTACT_PROPERTIES
+    };
+
+    if (search && search.trim()) {
+        body.query = search.trim();
+    }
+    if (filters.length > 0) {
+        body.filterGroups = [{ filters }];
+    }
+
+    const res = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body)
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+        throw new Error(data.message || `HubSpot API error ${res.status}`);
+    }
+
+    return {
+        results: data.results || [],
+        total: data.total !== undefined ? data.total : (data.results || []).length
+    };
+}
+
+/**
+ * Fetches verified portal/website/webhook contacts by batch-reading tracked IDs from HubSpot.
+ */
+async function fetchContactsBySourceFromHubSpot(token, sourcesMap, targetSource, { page = 1, limit = 10, search = '', stage = 'ALL', sort = 'newest', startDate = '', endDate = '' }) {
+    const candidateIds = [];
+    for (const [id, info] of Object.entries(sourcesMap || {})) {
+        if (info?.object_type && info.object_type !== 'contact') continue;
+        const norm = getNormalizedContactSource(info);
+        if (norm === targetSource) {
+            candidateIds.push(id);
+        }
+    }
+
+    if (candidateIds.length === 0) {
+        return { results: [], total: 0 };
+    }
+
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    let fetched = [];
+
+    for (let i = 0; i < candidateIds.length; i += 100) {
+        const chunk = candidateIds.slice(i, i + 100);
+        const res = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/batch/read', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                properties: CONTACT_PROPERTIES,
+                inputs: chunk.map(id => ({ id: String(id) }))
+            })
+        });
+        const data = await res.json().catch(() => ({ results: [] }));
+        if (Array.isArray(data.results)) {
+            fetched.push(...data.results);
+        }
+    }
+
+    // Apply local filters for this subset
+    const q = (search || '').toLowerCase().trim();
+    const startMs = startDate ? new Date(startDate).getTime() : null;
+    let endMs = null;
+    if (endDate) {
+        const endObj = new Date(endDate);
+        if (!isNaN(endObj.getTime())) {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(String(endDate).trim())) endObj.setHours(23, 59, 59, 999);
+            endMs = endObj.getTime();
+        }
+    }
+
+    let filtered = fetched.filter(c => {
+        const p = c.properties || {};
+        if (stage && stage !== 'ALL' && (p.lifecyclestage || 'lead') !== stage) return false;
+        if (startMs && (!p.createdate || new Date(p.createdate).getTime() < startMs)) return false;
+        if (endMs && (!p.createdate || new Date(p.createdate).getTime() > endMs)) return false;
+        if (q) {
+            const hay = `${p.firstname || ''} ${p.lastname || ''} ${p.email || ''} ${p.phone || ''} ${p.jobtitle || ''} ${c.id}`.toLowerCase();
+            if (!hay.includes(q)) return false;
+        }
+        return true;
+    });
+
+    filtered.sort((a, b) => {
+        if (sort === 'oldest') return new Date(a.properties?.createdate || 0) - new Date(b.properties?.createdate || 0);
+        if (sort === 'name') return `${a.properties?.firstname || ''} ${a.properties?.lastname || ''}`.trim().localeCompare(`${b.properties?.firstname || ''} ${b.properties?.lastname || ''}`.trim());
+        return new Date(b.properties?.createdate || 0) - new Date(a.properties?.createdate || 0);
+    });
+
+    const safeLimit = Math.min(Math.max(Number(limit) || 10, 1), 100);
+    const safePage = Math.max(Number(page) || 1, 1);
+    const start = (safePage - 1) * safeLimit;
+    return {
+        results: filtered.slice(start, start + safeLimit),
+        total: filtered.length
+    };
+}
+
+/**
+ * Computes exact CRM-wide channel breakdown & today's contacts count across ALL contacts in HubSpot.
+ */
+async function computeContactChannelStats(token, sourcesMap, knownCrmTotal = null) {
+    const now = Date.now();
+    if (contactStatsCache && (now - contactStatsCacheTime < CONTACTS_CACHE_TTL_MS)) {
+        return contactStatsCache;
+    }
+
+    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+    // Collect contact IDs tracked in Postgres as Bridge Portal or Website Form
+    const portalOrWebIds = [];
+    const idToChannel = {};
+    for (const [id, info] of Object.entries(sourcesMap || {})) {
+        if (info?.object_type && info.object_type !== 'contact') continue;
+        const norm = getNormalizedContactSource(info);
+        if (norm === 'Bridge Portal' || norm === 'Website Form') {
+            portalOrWebIds.push(id);
+            idToChannel[id] = norm;
+        }
+    }
+
+    // Start of today (UTC)
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    const tasks = [
+        // 1. Total CRM count (reuse knownCrmTotal if unfiltered total was already fetched)
+        knownCrmTotal !== null
+            ? Promise.resolve(knownCrmTotal)
+            : fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
+                  method: 'POST',
+                  headers,
+                  body: JSON.stringify({ limit: 1, properties: ['email'] })
+              }).then(r => r.json()).then(d => d.total || 0).catch(() => 0),
+
+        // 2. Today's created contacts count across entire CRM
+        fetch('https://api.hubapi.com/crm/v3/objects/contacts/search', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                limit: 1,
+                filterGroups: [{
+                    filters: [{ propertyName: 'createdate', operator: 'GTE', value: String(todayStart.getTime()) }]
+                }],
+                properties: ['email']
+            })
+        }).then(r => r.json()).then(d => d.total || 0).catch(() => 0),
+
+        // 3. Verify which Postgres-tracked Portal/Website contact IDs actually exist in the currently connected HubSpot portal
+        (async () => {
+            let adminCount = 0;
+            let webCount = 0;
+            for (let i = 0; i < portalOrWebIds.length; i += 100) {
+                const chunk = portalOrWebIds.slice(i, i + 100);
+                const res = await fetch('https://api.hubapi.com/crm/v3/objects/contacts/batch/read', {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                        properties: ['email'],
+                        inputs: chunk.map(id => ({ id: String(id) }))
+                    })
+                }).then(r => r.json()).catch(() => ({ results: [] }));
+
+                for (const item of (res.results || [])) {
+                    const ch = idToChannel[String(item.id)];
+                    if (ch === 'Bridge Portal') adminCount++;
+                    else if (ch === 'Website Form') webCount++;
+                }
+            }
+            return { adminCount, webCount };
+        })()
+    ];
+
+    const [crmTotal, todayCount, verifiedCounts] = await Promise.all(tasks);
+    const adminCount = verifiedCounts.adminCount || 0;
+    const webCount = verifiedCounts.webCount || 0;
+    const hsCount = Math.max(0, crmTotal - adminCount - webCount);
+
+    const stats = {
+        total: crmTotal,
+        adminCount,
+        webCount,
+        hsCount,
+        todayCount
+    };
+
+    contactStatsCache = stats;
+    contactStatsCacheTime = now;
+    return stats;
 }
 
 export default async function handler(req, res) {
     if (req.method === 'GET') {
         try {
-            console.log('🐞 [API] /api/contacts (GET) called');
+            console.log('🐞 [API] /api/contacts (GET) called', req.query || {});
 
             const auth = await authenticateRequest(req);
             if (!auth.authenticated) {
@@ -111,76 +426,82 @@ export default async function handler(req, res) {
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
             }
 
-            const nowContacts = Date.now();
-            let rawContactsData = null;
-            if (contactsCache && (nowContacts - contactsCacheTime < CONTACTS_CACHE_TTL_MS)) {
-                rawContactsData = contactsCache;
-            } else {
-                rawContactsData = await fetchContactsFromHubSpot(token);
-                contactsCache = rawContactsData;
-                contactsCacheTime = nowContacts;
+            const q = req.query || {};
+            const hasExplicitPagination = q.page !== undefined || q.limit !== undefined || q.search !== undefined || q.stage !== undefined || q.source !== undefined || q.sort !== undefined;
+            const page = Math.max(parseInt(q.page, 10) || 1, 1);
+            const limit = Math.min(Math.max(parseInt(q.limit, 10) || (hasExplicitPagination ? 10 : 50), 1), 100);
+            const search = String(q.search || '').trim();
+            const stage = String(q.stage || 'ALL').trim();
+            const source = String(q.source || 'ALL').trim();
+            const sort = String(q.sort || 'newest').trim();
+            const startDate = String(q.startDate || '').trim();
+            const endDate = String(q.endDate || '').trim();
+            const includeStats = q.includeStats === 'true' || !hasExplicitPagination;
+            const forceRefresh = q.refresh === 'true';
+
+            if (forceRefresh) {
+                invalidateContactsCache();
+            }
+
+            const cacheKey = JSON.stringify({ page, limit, search, stage, source, sort, startDate, endDate, includeStats });
+            const now = Date.now();
+            const cachedEntry = contactsQueryCache.get(cacheKey);
+            if (cachedEntry && (now - cachedEntry.time < CONTACTS_CACHE_TTL_MS)) {
+                return res.status(200).json(cachedEntry.payload);
             }
 
             const sourcesMap = await getLeadSourcesMap();
 
-            const contacts = (rawContactsData.results || []).map((c) => {
-                const fn = c.properties.firstname || '';
-                const ln = (c.properties.lastname === '-' ? '' : c.properties.lastname) || '';
-                const srcInfo = sourcesMap[String(c.id)];
-                const srcName = typeof srcInfo === 'object' ? srcInfo?.source : srcInfo;
-                let creator = typeof srcInfo === 'object' ? srcInfo?.created_by : null;
+            const isUnfiltered = !search && stage === 'ALL' && source === 'ALL' && !startDate && !endDate;
 
-                const creatorUserId = typeof srcInfo === 'object' ? srcInfo?.created_by_user_id : null;
-                const isPortalContact = Boolean(
-                    creatorUserId || 
-                    srcName === 'Admin Dashboard' || 
-                    srcName === 'Bridge Portal'
-                );
+            let queryData;
+            if (source === 'Bridge Portal' || source === 'Website Form' || source === 'HubSpot Webhook') {
+                queryData = await fetchContactsBySourceFromHubSpot(token, sourcesMap, source, {
+                    page, limit, search, stage, sort, startDate, endDate
+                });
+            } else {
+                queryData = await searchContactsInHubSpot(token, {
+                    page, limit, search, stage, sort, startDate, endDate
+                });
+            }
 
-                let leadSource = 'HubSpot Direct';
-                if (isPortalContact) {
-                    leadSource = 'Admin Dashboard';
-                } else if (creator === 'Public Lead Form' || srcName === 'Website Form' || (srcName || '').toLowerCase().includes('website')) {
-                    leadSource = 'Website Form';
-                } else if ((srcName || '').toLowerCase().includes('webhook') || (c.properties.lead_source || '').toLowerCase().includes('webhook')) {
-                    leadSource = 'HubSpot Webhook';
-                } else if (srcName === 'HubSpot CRM' || srcName === 'HubSpot Direct' || c.properties.lead_source) {
-                    leadSource = srcName || c.properties.lead_source || 'HubSpot Direct';
-                }
+            const rawResults = queryData.results || [];
+            const filteredTotal = queryData.total !== undefined ? queryData.total : rawResults.length;
 
-                if (!creator) {
-                    if (leadSource === 'Website Form' || leadSource.toLowerCase().includes('website')) {
-                        creator = 'Public Lead Form';
-                    } else if (leadSource === 'Admin Dashboard' || leadSource.toLowerCase().includes('admin')) {
-                        creator = 'Admin User';
-                    } else {
-                        creator = 'HubSpot CRM';
-                    }
-                }
+            // Hydrate associations for visible page + compute channel stats (if requested) in parallel
+            const [assocData, channelStats] = await Promise.all([
+                hydrateContactAssociations(rawResults.map(c => c.id), token),
+                includeStats
+                    ? computeContactChannelStats(token, sourcesMap, isUnfiltered ? filteredTotal : null)
+                    : Promise.resolve(contactStatsCache || null)
+            ]);
 
-                return {
-                    id: c.id,
-                    firstname: fn,
-                    lastname: ln,
-                    name: `${fn} ${ln}`.trim() || 'Lead',
-                    email: c.properties.email || '',
-                    phone: c.properties.phone || '',
-                    jobtitle: c.properties.jobtitle || '',
-                    hubspot_owner_id: c.properties.hubspot_owner_id || '',
-                    lifecyclestage: c.properties.lifecyclestage || 'lead',
-                    hs_lead_status: c.properties.hs_lead_status || '',
-                    associatedCompanyIds: (c.associations?.companies?.results || []).map(r => String(r.id)),
-                    associatedDealIds: (c.associations?.deals?.results || []).map(r => String(r.id)),
-                    subject: c.properties.subject || '',
-                    message: c.properties.message || '',
-                    lead_source: leadSource,
-                    created_by: creator,
-                    createdate: c.properties.createdate,
-                };
-            }).sort((a, b) => new Date(b.createdate || 0) - new Date(a.createdate || 0));
+            const contacts = rawResults.map((c) =>
+                formatContactRecord(c, sourcesMap, assocData.companyAssocMap, assocData.dealAssocMap)
+            );
 
-            console.log(`✅ [API] Returning ${contacts.length} contacts (total in CRM: ${rawContactsData.total})`);
-            return res.status(200).json({ contacts, total: rawContactsData.total });
+            const crmTotal = channelStats?.total ?? (isUnfiltered ? filteredTotal : (contactStatsCache?.total ?? filteredTotal));
+            const totalPages = Math.max(1, Math.ceil(filteredTotal / limit));
+
+            const payload = {
+                contacts,
+                total: crmTotal,
+                filteredTotal,
+                page,
+                limit,
+                totalPages,
+                ...(channelStats ? { channelStats } : {})
+            };
+
+            // Maintain bounded cache size
+            if (contactsQueryCache.size >= 60) {
+                const oldestKey = contactsQueryCache.keys().next().value;
+                contactsQueryCache.delete(oldestKey);
+            }
+            contactsQueryCache.set(cacheKey, { time: now, payload });
+
+            console.log(`✅ [API] Returning page ${page}/${totalPages} (${contacts.length} contacts, filtered: ${filteredTotal}, total in CRM: ${crmTotal})`);
+            return res.status(200).json(payload);
         } catch (err) {
             console.error('🔥 [API] Unexpected error:', err);
             return res.status(500).json({ error: 'Failed to load contacts.' });

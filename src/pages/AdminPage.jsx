@@ -88,6 +88,8 @@ function AdminDashboardContent() {
   const [totalContactsCount, setTotalContactsCount] = useState(null);
   const [totalCompaniesCount, setTotalCompaniesCount] = useState(null);
   const [totalDealsCount, setTotalDealsCount] = useState(null);
+  const [contactStats, setContactStats] = useState(null);
+  const [contactsRefreshKey, setContactsRefreshKey] = useState(0);
 
   // LOAD DATA FROM HUBSPOT & ERROR LOG APIs
   const loadContacts = useCallback(async (silent = false) => {
@@ -97,7 +99,10 @@ function AdminDashboardContent() {
     }
     setError(null);
     try {
-      const res = await fetch('/api/contacts', {
+      const url = silent
+        ? '/api/contacts?limit=50&includeStats=true'
+        : '/api/contacts?limit=50&includeStats=true&refresh=true';
+      const res = await fetch(url, {
         headers: getAuthHeaders(),
       });
       if (res.status === 401) {
@@ -112,6 +117,8 @@ function AdminDashboardContent() {
       const data = await res.json();
       setContacts(data.contacts || []);
       if (data.total !== undefined) setTotalContactsCount(data.total);
+      if (data.channelStats) setContactStats(data.channelStats);
+      setContactsRefreshKey(k => k + 1);
       setLastSyncedAt(new Date().toLocaleTimeString());
       return data;
     } catch (err) {
@@ -459,6 +466,7 @@ function AdminDashboardContent() {
               totalContactsCount={totalContactsCount}
               totalCompaniesCount={totalCompaniesCount}
               totalDealsCount={totalDealsCount}
+              contactStats={contactStats}
               errorLogs={filteredErrorLogs}
               activities={filteredActivities}
               loading={loading}
@@ -479,6 +487,10 @@ function AdminDashboardContent() {
                 contacts={filteredContacts}
                 allContacts={contacts}
                 totalContactsCount={totalContactsCount}
+                dateRange={dateRange}
+                customStart={customStart}
+                customEnd={customEnd}
+                refreshTrigger={contactsRefreshKey}
                 companies={companies}
                 deals={deals}
                 pipelines={pipelines}

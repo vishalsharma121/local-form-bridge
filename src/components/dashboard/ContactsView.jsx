@@ -218,6 +218,10 @@ export default function ContactsView({
   contacts = [],
   allContacts = [],
   totalContactsCount,
+  dateRange = 'all',
+  customStart = '',
+  customEnd = '',
+  refreshTrigger = 0,
   companies = [],
   deals = [],
   pipelines = [],
@@ -763,52 +767,136 @@ export default function ContactsView({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Filter and Sort contacts
-  const filteredContacts = useMemo(() => {
-    let result = [...contacts];
+  // Server-side pagination & live HubSpot Search state (supports browsing & searching all CRM contacts)
+  const [serverContacts, setServerContacts] = useState(() => contacts.slice(0, pageSize));
+  const [serverFilteredTotal, setServerFilteredTotal] = useState(
+    totalContactsCount !== null && totalContactsCount !== undefined ? totalContactsCount : contacts.length
+  );
+  const [serverCrmTotal, setServerCrmTotal] = useState(
+    totalContactsCount !== null && totalContactsCount !== undefined ? totalContactsCount : contacts.length
+  );
+  const [serverTotalPages, setServerTotalPages] = useState(() =>
+    Math.max(1, Math.ceil(((totalContactsCount ?? contacts.length) || 1) / pageSize))
+  );
+  const [pageLoading, setPageLoading] = useState(false);
+  const [pageError, setPageError] = useState(null);
+  const [debouncedSearch, setDebouncedSearch] = useState(searchQuery);
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      result = result.filter(c => 
-        (c.name || '').toLowerCase().includes(q) ||
-        (c.firstname || '').toLowerCase().includes(q) ||
-        (c.lastname || '').toLowerCase().includes(q) ||
-        (c.email || '').toLowerCase().includes(q) ||
-        (c.phone || '').toLowerCase().includes(q) ||
-        (c.jobtitle || '').toLowerCase().includes(q) ||
-        String(c.id).includes(q)
-      );
+  // Debounce search query (350ms) so live HubSpot Search doesn't fire on every keystroke
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  // Reset to page 1 when global timeframe filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateRange, customStart, customEnd]);
+
+  // Compute server-side date bounds from global dateRange
+  const { startDateParam, endDateParam } = useMemo(() => {
+    if (!dateRange || dateRange === 'all') return { startDateParam: '', endDateParam: '' };
+    const now = new Date();
+    if (dateRange === 'today') {
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      return { startDateParam: todayStart.toISOString(), endDateParam: '' };
+    }
+    if (dateRange === '7days') {
+      const d = new Date();
+      d.setDate(now.getDate() - 7);
+      return { startDateParam: d.toISOString(), endDateParam: '' };
+    }
+    if (dateRange === '30days') {
+      const d = new Date();
+      d.setDate(now.getDate() - 30);
+      return { startDateParam: d.toISOString(), endDateParam: '' };
+    }
+    if (dateRange === 'custom') {
+      return { startDateParam: customStart || '', endDateParam: customEnd || '' };
+    }
+    return { startDateParam: '', endDateParam: '' };
+  }, [dateRange, customStart, customEnd]);
+
+  // Fetch active page directly from HubSpot via /api/contacts server-side pagination
+  useEffect(() => {
+    const controller = new AbortController();
+    let isMounted = true;
+
+    async function fetchContactsPage() {
+      setPageLoading(true);
+      setPageError(null);
+      try {
+        const params = new URLSearchParams({
+          page: String(currentPage),
+          limit: String(pageSize),
+          sort: sortBy,
+          stage: selectedLifecycleFilter,
+          source: selectedSourceFilter
+        });
+        if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim());
+        if (startDateParam) params.set('startDate', startDateParam);
+        if (endDateParam) params.set('endDate', endDateParam);
+
+        const res = await fetch(`/api/contacts?${params.toString()}`, {
+          headers: getAuthHeaders(),
+          signal: controller.signal
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Failed to load contacts (HTTP ${res.status})`);
+        }
+
+        const data = await res.json();
+        if (!isMounted) return;
+
+        setServerContacts(data.contacts || []);
+        setServerFilteredTotal(data.filteredTotal !== undefined ? data.filteredTotal : (data.contacts || []).length);
+        if (data.total !== undefined) setServerCrmTotal(data.total);
+        setServerTotalPages(data.totalPages || Math.max(1, Math.ceil((data.filteredTotal || 0) / pageSize)));
+        setSelectedIds([]);
+      } catch (err) {
+        if (err.name === 'AbortError' || !isMounted) return;
+        setPageError(err.message || 'Failed to load contacts page.');
+      } finally {
+        if (isMounted) setPageLoading(false);
+      }
     }
 
-    if (selectedSourceFilter !== 'ALL') {
-      result = result.filter(c => getNormalizedSource(c.lead_source, c.created_by) === selectedSourceFilter);
-    }
+    fetchContactsPage();
+    return () => {
+      isMounted = false;
+      controller.abort();
+    };
+  }, [
+    currentPage,
+    pageSize,
+    debouncedSearch,
+    selectedLifecycleFilter,
+    selectedSourceFilter,
+    sortBy,
+    startDateParam,
+    endDateParam,
+    refreshTrigger,
+    getAuthHeaders
+  ]);
 
-    if (selectedLifecycleFilter !== 'ALL') {
-      result = result.filter(c => (c.lifecyclestage || 'lead') === selectedLifecycleFilter);
-    }
-
-    result.sort((a, b) => {
-      if (sortBy === 'newest') {
-        return new Date(b.createdate || 0) - new Date(a.createdate || 0);
-      }
-      if (sortBy === 'oldest') {
-        return new Date(a.createdate || 0) - new Date(b.createdate || 0);
-      }
-      if (sortBy === 'name') {
-        return (a.name || '').localeCompare(b.name || '');
-      }
-      return 0;
-    });
-
-    return result;
-  }, [contacts, searchQuery, selectedSourceFilter, selectedLifecycleFilter, sortBy]);
-
-  const totalPages = Math.ceil(filteredContacts.length / pageSize) || 1;
-  const paginatedContacts = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredContacts.slice(start, start + pageSize);
-  }, [filteredContacts, currentPage, pageSize]);
+  const filteredContacts = serverContacts;
+  const paginatedContacts = serverContacts;
+  const totalPages = serverTotalPages;
+  const activeFilteredTotal = serverFilteredTotal;
+  const activeCrmTotal = totalContactsCount ?? serverCrmTotal;
+  const isFilteredView = Boolean(
+    debouncedSearch.trim() ||
+    selectedLifecycleFilter !== 'ALL' ||
+    selectedSourceFilter !== 'ALL' ||
+    startDateParam ||
+    endDateParam
+  );
+  const displayError = pageError || error;
+  const isInitialEmptyLoading = (loading || pageLoading) && paginatedContacts.length === 0;
 
   const handleSelectAll = () => {
     if (selectedIds.length === paginatedContacts.length) {
@@ -917,7 +1005,10 @@ export default function ContactsView({
           <div className="relative">
             <select
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
+              onChange={(e) => {
+                setSortBy(e.target.value);
+                setCurrentPage(1);
+              }}
               className="appearance-none bg-slate-50 border border-slate-200 rounded-2xl pl-3.5 pr-8 py-2 text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] cursor-pointer shadow-inner"
             >
               <option value="newest">Newest First</option>
@@ -934,7 +1025,7 @@ export default function ContactsView({
             <button
               onClick={() => onExportCSV(filteredContacts)}
               className="px-3.5 py-2.5 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-slate-700 text-xs font-bold transition-all flex items-center gap-2 shadow-2xs cursor-pointer"
-              title="Export Contacts as CSV"
+              title="Export Current Page as CSV"
             >
               <Download className="w-3.5 h-3.5 text-slate-500" />
               <span className="hidden sm:inline">Export CSV</span>
@@ -960,35 +1051,35 @@ export default function ContactsView({
 
       {/* Main Table Container */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-[0_4px_20px_rgba(0,0,0,0.02)] overflow-hidden flex flex-col flex-1 min-h-0">
-        {loading && (
+        {isInitialEmptyLoading && (
           <div className="p-12 text-center text-slate-500 space-y-3">
             <div className="w-8 h-8 border-4 border-[#EE3124] border-t-transparent rounded-full animate-spin mx-auto" />
             <p className="text-xs font-semibold">Loading contacts from HubSpot API...</p>
           </div>
         )}
 
-        {error && !loading && (
+        {displayError && !isInitialEmptyLoading && (
           <div className="p-8 text-center text-red-600 bg-red-50 border border-red-200 rounded-2xl m-4 space-y-2">
-            <p className="text-sm font-bold">Failed to load contacts: {error}</p>
+            <p className="text-sm font-bold">Failed to load contacts: {displayError}</p>
             <p className="text-xs text-slate-500">Please check your HubSpot connection or network status.</p>
           </div>
         )}
 
-        {!loading && !error && filteredContacts.length === 0 && (
+        {!isInitialEmptyLoading && !displayError && paginatedContacts.length === 0 && (
           <div className="p-12 text-center text-slate-400 space-y-2">
             <User className="w-10 h-10 text-slate-300 mx-auto" />
             <p className="text-sm font-bold text-slate-700">No contacts found</p>
             <p className="text-xs text-slate-500">
-              {searchQuery || selectedLifecycleFilter !== 'ALL'
+              {isFilteredView
                 ? 'Try adjusting your search query or filters.'
                 : 'No contacts found.'}
             </p>
           </div>
         )}
 
-        {!loading && !error && filteredContacts.length > 0 && (
+        {!isInitialEmptyLoading && !displayError && paginatedContacts.length > 0 && (
           <>
-            <div className="overflow-x-auto overflow-y-auto flex-1 min-h-0">
+            <div className={`overflow-x-auto overflow-y-auto flex-1 min-h-0 transition-opacity duration-200 ${pageLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'}`}>
               <table className="w-full text-left text-xs sm:text-sm">
                 <thead className="sticky top-0 bg-slate-50 z-10 text-[11px] font-extrabold uppercase tracking-wider text-slate-500 border-b border-slate-200/80">
                   <tr>
@@ -1147,15 +1238,18 @@ export default function ContactsView({
             {/* Pagination */}
             <div className="shrink-0 px-5 py-3 bg-slate-50/70 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3 text-xs font-bold text-slate-500">
               <div className="flex items-center gap-3">
-                <span>
-                  Showing <span className="font-bold text-slate-800">{((currentPage - 1) * pageSize + 1).toLocaleString()}</span> to{' '}
-                  <span className="font-bold text-slate-800">{Math.min(currentPage * pageSize, filteredContacts.length).toLocaleString()}</span> of{' '}
-                  <span className="font-bold text-slate-800">{filteredContacts.length.toLocaleString()}</span>{' '}
-                  {totalContactsCount && totalContactsCount > filteredContacts.length ? (
-                    <span>newest active contacts <span className="text-slate-400 font-medium">({totalContactsCount.toLocaleString()} total in CRM)</span></span>
-                  ) : (
-                    <span>contacts</span>
-                  )}
+                <span className="inline-flex items-center gap-1.5">
+                  {pageLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-[#EE3124]" />}
+                  <span>
+                    Showing <span className="font-bold text-slate-800">{((currentPage - 1) * pageSize + 1).toLocaleString()}</span> to{' '}
+                    <span className="font-bold text-slate-800">{Math.min(currentPage * pageSize, activeFilteredTotal).toLocaleString()}</span> of{' '}
+                    <span className="font-bold text-slate-800">{activeFilteredTotal.toLocaleString()}</span>{' '}
+                    {isFilteredView && activeCrmTotal > activeFilteredTotal ? (
+                      <span>matching contacts <span className="text-slate-400 font-medium">({activeCrmTotal.toLocaleString()} total in CRM)</span></span>
+                    ) : (
+                      <span>contacts</span>
+                    )}
+                  </span>
                 </span>
                 <span className="text-slate-300">|</span>
                 <div className="flex items-center gap-1.5">
@@ -1171,20 +1265,23 @@ export default function ContactsView({
                     <option value={10}>10</option>
                     <option value={25}>25</option>
                     <option value={50}>50</option>
+                    <option value={100}>100</option>
                   </select>
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  disabled={currentPage === 1}
+                  disabled={currentPage === 1 || pageLoading}
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-bold disabled:opacity-40 hover:bg-slate-100 transition-all cursor-pointer"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
-                <span>Page {currentPage} of {totalPages}</span>
+                <span className="font-bold text-slate-700">
+                  Page {currentPage.toLocaleString()} of {totalPages.toLocaleString()}
+                </span>
                 <button
-                  disabled={currentPage === totalPages}
+                  disabled={currentPage === totalPages || pageLoading}
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   className="px-3 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 font-bold disabled:opacity-40 hover:bg-slate-100 transition-all cursor-pointer"
                 >
