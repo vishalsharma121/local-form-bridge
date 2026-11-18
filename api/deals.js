@@ -195,6 +195,7 @@ export default async function handler(req, res) {
                     dealtype: d.properties.dealtype || '',
                     hs_priority: d.properties.hs_priority || '',
                     lead_source: leadSource,
+                    hubspot_lead_source: d.properties.lead_source || '',
                     created_by: creator,
                     created_by_user_id: creatorUserId,
                     created_by_email: creatorEmail,
@@ -357,6 +358,7 @@ export default async function handler(req, res) {
                 assigned_user_id,
                 assigned_to,
                 assigned_user_email,
+                deal_lead_source,
                 dealtype,
                 hs_priority,
                 contactId,
@@ -411,8 +413,16 @@ export default async function handler(req, res) {
                 dealstage: finalStage,
                 amount: finalAmount,
                 description: `Created by ${userName} (${userEmail}) via Admin Dashboard`,
-                lead_source: 'Admin Dashboard',
             };
+
+            if (deal_lead_source) {
+                const formattedLeadSource = Array.isArray(deal_lead_source)
+                    ? deal_lead_source.map(v => String(v).trim()).filter(Boolean).join(';')
+                    : String(deal_lead_source).trim();
+                if (formattedLeadSource) {
+                    properties.lead_source = formattedLeadSource;
+                }
+            }
 
             if (closedate) {
                 try {
@@ -459,12 +469,16 @@ export default async function handler(req, res) {
                     try {
                         const cloned = res.clone();
                         const errData = await cloned.json();
-                        if (errData.message?.includes('PROPERTY_DOESNT_EXIST') || errData.errors?.some(e => e.code === 'PROPERTY_DOESNT_EXIST')) {
-                            console.warn('⚠️ [HubSpot Safety Net] Property safety net triggered. Stripping custom property and retrying...');
+                        const isPropMissingOrInvalid =
+                            errData.message?.includes('PROPERTY_DOESNT_EXIST') ||
+                            errData.message?.includes('INVALID_OPTION') ||
+                            errData.errors?.some(e => e.code === 'PROPERTY_DOESNT_EXIST' || e.code === 'INVALID_OPTION');
+                        if (isPropMissingOrInvalid) {
+                            console.warn('⚠️ [HubSpot Safety Net] Property safety net triggered. Stripping incompatible custom property and retrying...');
                             if (opts.body) {
                                 const parsed = JSON.parse(opts.body);
                                 let modified = false;
-                                if (parsed.properties && parsed.properties.lead_source) {
+                                if (parsed.properties && parsed.properties.lead_source && errData.message?.includes('lead_source')) {
                                     delete parsed.properties.lead_source;
                                     modified = true;
                                 }
@@ -608,7 +622,7 @@ export default async function handler(req, res) {
                 return res.status(403).json({ error: 'Permission denied. Your user permissions do not allow editing deals.' });
             }
 
-            const { id, dealname, pipeline, dealstage, amount, closedate, hubspot_owner_id, dealtype, hs_priority } = req.body || {};
+            const { id, dealname, pipeline, dealstage, amount, closedate, hubspot_owner_id, dealtype, hs_priority, deal_lead_source } = req.body || {};
             const dealId = id || req.query?.id;
 
             if (!dealId) {
@@ -692,6 +706,11 @@ export default async function handler(req, res) {
             }
             if (hs_priority !== undefined) {
                 properties.hs_priority = String(hs_priority || '').trim();
+            }
+            if (deal_lead_source !== undefined) {
+                properties.lead_source = Array.isArray(deal_lead_source)
+                    ? deal_lead_source.map(v => String(v).trim()).filter(Boolean).join(';')
+                    : String(deal_lead_source || '').trim();
             }
 
             if (isSuperAdmin && (req.body?.assigned_user_id !== undefined || req.body?.assigned_to !== undefined)) {

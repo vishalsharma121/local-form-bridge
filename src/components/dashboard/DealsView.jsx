@@ -79,6 +79,15 @@ export default function DealsView({
     { value: 'medium', label: 'Medium' },
     { value: 'high', label: 'High' }
   ]);
+  const [dealLeadSources, setDealLeadSources] = useState([
+    { value: 'Upwork', label: 'Upwork' },
+    { value: 'Cold Email', label: 'Cold Email' },
+    { value: 'Wix', label: 'Wix' },
+    { value: 'Contra', label: 'Contra' },
+    { value: 'Direct', label: 'Direct' },
+    { value: 'Dribble', label: 'Dribble' },
+    { value: 'Old Client', label: 'Old Client' }
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -104,6 +113,9 @@ export default function DealsView({
           }
           if (Array.isArray(propData.dealPriorities) && propData.dealPriorities.length > 0) {
             setDealPriorities(propData.dealPriorities);
+          }
+          if (Array.isArray(propData.dealLeadSources) && propData.dealLeadSources.length > 0) {
+            setDealLeadSources(propData.dealLeadSources);
           }
         }
 
@@ -336,6 +348,7 @@ export default function DealsView({
     hubspot_owner_id: '',
     assigned_user_id: '',
     assigned_to: '',
+    deal_lead_source: [],
     dealtype: '',
     hs_priority: ''
   });
@@ -357,6 +370,9 @@ export default function DealsView({
         formattedCloseDate = d.closedate;
       }
     }
+    const existingLeadSources = d.hubspot_lead_source
+      ? String(d.hubspot_lead_source).split(';').map(s => s.trim()).filter(Boolean)
+      : [];
     setEditingDeal(d);
     setEditDealData({
       dealname: d.dealname || '',
@@ -367,6 +383,7 @@ export default function DealsView({
       hubspot_owner_id: d.hubspot_owner_id || '',
       assigned_user_id: d.assigned_user_id || '',
       assigned_to: d.assigned_to || '',
+      deal_lead_source: existingLeadSources,
       dealtype: d.dealtype || '',
       hs_priority: d.hs_priority || ''
     });
@@ -411,6 +428,7 @@ export default function DealsView({
           assigned_user_id: editDealData.assigned_user_id || null,
           assigned_to: editDealData.assigned_to || selectedMemberObj?.name || null,
           assigned_user_email: selectedMemberObj?.email || null,
+          deal_lead_source: editDealData.deal_lead_source,
           dealtype: editDealData.dealtype || '',
           hs_priority: editDealData.hs_priority || ''
         })
@@ -473,6 +491,8 @@ export default function DealsView({
     amount: '',
     closedate: getDefaultCloseDate(),
     hubspot_owner_id: '',
+    assigned_user_id: '',
+    deal_lead_source: [],
     dealtype: '',
     hs_priority: '',
     contactId: '',
@@ -896,6 +916,10 @@ export default function DealsView({
         }
       }
 
+      const chosenHandler = newDealData.assigned_user_id
+        ? teamMembers.find(m => String(m.id) === String(newDealData.assigned_user_id))
+        : null;
+
       // Create Deal with all HubSpot native properties
       const dealRes = await fetch('/api/deals', {
         method: 'POST',
@@ -907,6 +931,10 @@ export default function DealsView({
           amount: newDealData.amount || '0',
           closedate: newDealData.closedate || null,
           hubspot_owner_id: newDealData.hubspot_owner_id || null,
+          assigned_user_id: newDealData.assigned_user_id || null,
+          assigned_to: chosenHandler?.name || null,
+          assigned_user_email: chosenHandler?.email || null,
+          deal_lead_source: newDealData.deal_lead_source || [],
           dealtype: newDealData.dealtype || null,
           hs_priority: newDealData.hs_priority || null,
           contactId: newDealData.contactId || null,
@@ -929,6 +957,8 @@ export default function DealsView({
           amount: '',
           closedate: getDefaultCloseDate(),
           hubspot_owner_id: '',
+          assigned_user_id: '',
+          deal_lead_source: [],
           dealtype: '',
           hs_priority: '',
           contactId: '',
@@ -1619,6 +1649,65 @@ export default function DealsView({
                         ))}
                       </select>
                       <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* 6b. Deal Handled By (Admins) */}
+                  {isSuperAdmin && (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                        Deal Handled By
+                      </label>
+                      <div className="relative">
+                        <select
+                          value={newDealData.assigned_user_id}
+                          onChange={(e) => setNewDealData({ ...newDealData, assigned_user_id: e.target.value })}
+                          className="w-full appearance-none px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00A389]/20 focus:border-[#00A389] transition-all cursor-pointer text-xs sm:text-sm pr-9"
+                        >
+                          <option value="">-- Unassigned (Needs Handler) --</option>
+                          {teamMembers.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.email})
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 6c. HubSpot Lead Source (Multiple Checkboxes) */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                      Lead Source
+                    </label>
+                    <div className="flex flex-wrap gap-1.5 p-2.5 bg-slate-50/80 border border-slate-200 rounded-xl">
+                      {dealLeadSources.map((src) => {
+                        const isChecked = (newDealData.deal_lead_source || []).includes(src.value);
+                        return (
+                          <button
+                            key={src.value}
+                            type="button"
+                            onClick={() => {
+                              setNewDealData((prev) => {
+                                const current = prev.deal_lead_source || [];
+                                const next = current.includes(src.value)
+                                  ? current.filter(v => v !== src.value)
+                                  : [...current, src.value];
+                                return { ...prev, deal_lead_source: next };
+                              });
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                              isChecked
+                                ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                                : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'
+                            }`}
+                          >
+                            {isChecked && <Check className="w-3 h-3" />}
+                            <span>{src.label}</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -2325,6 +2414,41 @@ export default function DealsView({
                         </option>
                       ))}
                     </select>
+                  </div>
+                </div>
+
+                {/* HubSpot Lead Source (Multiple Checkboxes) */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-800 mb-1.5">
+                    Lead Source
+                  </label>
+                  <div className="flex flex-wrap gap-1.5 p-2.5 bg-slate-50/80 border border-slate-200 rounded-xl">
+                    {dealLeadSources.map((src) => {
+                      const isChecked = (editDealData.deal_lead_source || []).includes(src.value);
+                      return (
+                        <button
+                          key={src.value}
+                          type="button"
+                          onClick={() => {
+                            setEditDealData((prev) => {
+                              const current = prev.deal_lead_source || [];
+                              const next = current.includes(src.value)
+                                ? current.filter(v => v !== src.value)
+                                : [...current, src.value];
+                              return { ...prev, deal_lead_source: next };
+                            });
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer inline-flex items-center gap-1 ${
+                            isChecked
+                              ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-emerald-300 hover:bg-emerald-50/40'
+                          }`}
+                        >
+                          {isChecked && <Check className="w-3 h-3" />}
+                          <span>{src.label}</span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 

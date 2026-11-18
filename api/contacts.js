@@ -1181,7 +1181,6 @@ export default async function handler(req, res) {
                                 pipeline: finalPipeline,
                                 dealstage: finalDealStage,
                                 amount: finalAmount,
-                                lead_source: 'Admin Dashboard',
                             },
                             associations: [
                                 {

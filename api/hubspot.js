@@ -222,15 +222,26 @@ async function handleProperties(req, res) {
       });
     }
 
+    const DEFAULT_DEAL_LEAD_SOURCES = [
+      { value: 'Upwork', label: 'Upwork' },
+      { value: 'Cold Email', label: 'Cold Email' },
+      { value: 'Wix', label: 'Wix' },
+      { value: 'Contra', label: 'Contra' },
+      { value: 'Direct', label: 'Direct' },
+      { value: 'Dribble', label: 'Dribble' },
+      { value: 'Old Client', label: 'Old Client' }
+    ];
+
     const headers = { Authorization: `Bearer ${token}` };
 
-    const [lifecycleRes, leadStatusRes, compIndustryRes, compTypeRes, dealTypeRes, dealPriorityRes] = await Promise.allSettled([
+    const [lifecycleRes, leadStatusRes, compIndustryRes, compTypeRes, dealTypeRes, dealPriorityRes, dealLeadSourceRes] = await Promise.allSettled([
       fetch('https://api.hubapi.com/crm/v3/properties/contacts/lifecyclestage', { headers }),
       fetch('https://api.hubapi.com/crm/v3/properties/contacts/hs_lead_status', { headers }),
       fetch('https://api.hubapi.com/crm/v3/properties/companies/industry', { headers }),
       fetch('https://api.hubapi.com/crm/v3/properties/companies/type', { headers }),
       fetch('https://api.hubapi.com/crm/v3/properties/deals/dealtype', { headers }),
-      fetch('https://api.hubapi.com/crm/v3/properties/deals/hs_priority', { headers })
+      fetch('https://api.hubapi.com/crm/v3/properties/deals/hs_priority', { headers }),
+      fetch('https://api.hubapi.com/crm/v3/properties/deals/lead_source', { headers })
     ]);
 
     let lifecycleStages = DEFAULT_LIFECYCLE_STAGES;
@@ -239,6 +250,7 @@ async function handleProperties(req, res) {
     let companyIndustries = DEFAULT_COMPANY_INDUSTRIES;
     let dealTypes = DEFAULT_DEAL_TYPES;
     let dealPriorities = DEFAULT_DEAL_PRIORITIES;
+    let dealLeadSources = DEFAULT_DEAL_LEAD_SOURCES;
     let isDynamic = false;
 
     if (lifecycleRes.status === 'fulfilled' && lifecycleRes.value.ok) {
@@ -347,6 +359,20 @@ async function handleProperties(req, res) {
       }
     }
 
+    if (dealLeadSourceRes.status === 'fulfilled' && dealLeadSourceRes.value.ok) {
+      const data = await dealLeadSourceRes.value.json();
+      if (Array.isArray(data.options) && data.options.length > 0) {
+        dealLeadSources = data.options
+          .filter(o => !o.hidden)
+          .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+          .map(o => ({
+            value: o.value,
+            label: o.label || o.value
+          }));
+        isDynamic = true;
+      }
+    }
+
     const responsePayload = {
       lifecycleStages,
       leadStatuses,
@@ -354,6 +380,7 @@ async function handleProperties(req, res) {
       companyTypes,
       dealTypes,
       dealPriorities,
+      dealLeadSources,
       isDynamic
     };
 
