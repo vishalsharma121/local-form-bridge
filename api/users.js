@@ -84,9 +84,11 @@ export default async function handler(req, res) {
             }
 
             // Automatically add new team member to HubSpot "Deal Handled By" dropdown
-            syncTeamMembersToHubSpotDealProperty().catch(err =>
-                console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after create:', err.message)
-            );
+            try {
+                await syncTeamMembersToHubSpotDealProperty();
+            } catch (syncErr) {
+                console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after create:', syncErr.message);
+            }
 
             return res.status(201).json({ success: true, user: result.user });
         } catch (err) {
@@ -166,9 +168,11 @@ export default async function handler(req, res) {
 
             // Automatically sync label rename or active/inactive status to HubSpot "Deal Handled By" dropdown
             if (name || typeof is_active === 'boolean') {
-                syncTeamMembersToHubSpotDealProperty(users).catch(err =>
-                    console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after update:', err.message)
-                );
+                try {
+                    await syncTeamMembersToHubSpotDealProperty(users);
+                } catch (syncErr) {
+                    console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after update:', syncErr.message);
+                }
             }
 
             return res.status(200).json({ 
@@ -203,10 +207,12 @@ export default async function handler(req, res) {
 
             const users = await listUsers();
 
-            // Mark deleted team member option as hidden in HubSpot (preserves historical deals)
-            syncTeamMembersToHubSpotDealProperty(users).catch(err =>
-                console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after delete:', err.message)
-            );
+            // Automatically remove deleted team member option from HubSpot dropdown
+            try {
+                await syncTeamMembersToHubSpotDealProperty(users);
+            } catch (syncErr) {
+                console.warn('⚠️ [API/Users] Background HubSpot handler sync failed after delete:', syncErr.message);
+            }
 
             return res.status(200).json({ success: true, users });
         } catch (err) {
