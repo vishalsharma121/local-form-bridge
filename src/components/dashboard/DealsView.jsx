@@ -31,7 +31,13 @@ import {
   Tag,
   ShieldCheck,
   Layers,
-  FileText
+  FileText,
+  Activity,
+  ListTodo,
+  RefreshCw,
+  Sparkles,
+  User,
+  MessageSquare
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -381,6 +387,68 @@ export default function DealsView({
       return false;
     }) || null;
   }, [selectedDeal, companies]);
+
+  // Deal Details Modal tab state: 'about' | 'activities'
+  const [dealModalTab, setDealModalTab] = useState('about');
+  const [dealActivities, setDealActivities] = useState([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
+  const [activitiesError, setActivitiesError] = useState('');
+  const [activityTypeFilter, setActivityTypeFilter] = useState('ALL');
+  const [activitySearchQuery, setActivitySearchQuery] = useState('');
+
+  const fetchActivitiesForDeal = async (dealId) => {
+    if (!dealId) return;
+    setLoadingActivities(true);
+    setActivitiesError('');
+    try {
+      const res = await fetch(`/api/deals?action=activities&dealId=${dealId}`, {
+        headers: getAuthHeaders()
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load deal activities.');
+      setDealActivities(data.activities || []);
+    } catch (err) {
+      console.error('Failed to load deal activities:', err);
+      setActivitiesError(err.message || 'Failed to load deal activities.');
+    } finally {
+      setLoadingActivities(false);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedDeal && selectedDeal.id) {
+      fetchActivitiesForDeal(selectedDeal.id);
+    } else {
+      setDealActivities([]);
+      setDealModalTab('about');
+      setActivitySearchQuery('');
+      setActivityTypeFilter('ALL');
+    }
+  }, [selectedDeal]);
+
+  const filteredActivities = useMemo(() => {
+    return dealActivities.filter(act => {
+      if (activityTypeFilter !== 'ALL' && act.type !== activityTypeFilter) {
+        return false;
+      }
+      if (activitySearchQuery.trim()) {
+        const q = activitySearchQuery.toLowerCase();
+        const titleMatch = (act.title || '').toLowerCase().includes(q);
+        const bodyMatch = (act.body || '').toLowerCase().includes(q);
+        const stageMatch = (act.stageId || '').toLowerCase().includes(q);
+        return titleMatch || bodyMatch || stageMatch;
+      }
+      return true;
+    });
+  }, [dealActivities, activityTypeFilter, activitySearchQuery]);
+
+  const activityCounts = useMemo(() => {
+    const counts = { ALL: dealActivities.length, task: 0, note: 0, stage_change: 0 };
+    for (const a of dealActivities) {
+      if (counts[a.type] !== undefined) counts[a.type]++;
+    }
+    return counts;
+  }, [dealActivities]);
 
   // Edit & Delete state for deals
   const [editingDeal, setEditingDeal] = useState(null);
@@ -1452,12 +1520,22 @@ export default function DealsView({
                         <div className="flex items-center justify-end">
                           <div className="inline-flex items-center gap-0.5 p-1 rounded-2xl bg-slate-100/80 border border-slate-200/80 shadow-2xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200">
                             <button
-                              onClick={() => setSelectedDeal(d)}
+                              onClick={() => { setSelectedDeal(d); setDealModalTab('about'); }}
                               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn cursor-pointer"
                               title="View Deal Details"
                             >
                               <Eye className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
                               <span>Details</span>
+                            </button>
+
+                            <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
+                            <button
+                              onClick={() => { setSelectedDeal(d); setDealModalTab('activities'); }}
+                              className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-[#EE3124] hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn cursor-pointer"
+                              title="View Deal Activities Timeline"
+                            >
+                              <Activity className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-[#EE3124] transition-colors" />
+                              <span className="hidden xl:inline">Activity</span>
                             </button>
 
                             {canEdit && (
@@ -2654,7 +2732,44 @@ export default function DealsView({
               </button>
             </div>
 
-            {/* Content Details */}
+            {/* Top Navigation Tabs: About Deal vs Deal Activities */}
+            <div className="flex items-center gap-1.5 p-1 bg-slate-100/90 rounded-2xl border border-slate-200/80">
+              <button
+                type="button"
+                onClick={() => setDealModalTab('about')}
+                className={`flex-1 inline-flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                  dealModalTab === 'about'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/70'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5 text-amber-500" />
+                <span>About Deal</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setDealModalTab('activities')}
+                className={`flex-1 inline-flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                  dealModalTab === 'activities'
+                    ? 'bg-white text-slate-900 shadow-xs border border-slate-200/70'
+                    : 'text-slate-500 hover:text-slate-800 hover:bg-white/60'
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5 text-[#EE3124]" />
+                <span>Deal Activities</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  dealModalTab === 'activities'
+                    ? 'bg-orange-100 text-[#EE3124]'
+                    : 'bg-slate-200 text-slate-600'
+                }`}>
+                  {loadingActivities ? '...' : dealActivities.length}
+                </span>
+              </button>
+            </div>
+
+            {/* Content Details: About Deal View */}
+            {dealModalTab === 'about' && (
             <div className="space-y-3.5 text-xs sm:text-sm">
               
               {/* Amount & Projected Close Date Banner */}
@@ -2824,6 +2939,286 @@ export default function DealsView({
               )}
 
             </div>
+            )}
+
+            {/* Deal Activities Tab View */}
+            {dealModalTab === 'activities' && (
+              <div className="space-y-4 text-xs sm:text-sm">
+                
+                {/* Search & Filter Bar */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+                  <div className="relative flex-1">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="Search activities, notes, tasks..."
+                      value={activitySearchQuery}
+                      onChange={(e) => setActivitySearchQuery(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] transition-all"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-1.5 self-end sm:self-auto">
+                    <button
+                      type="button"
+                      disabled={loadingActivities}
+                      onClick={() => fetchActivitiesForDeal(selectedDeal.id)}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                      title="Refresh real-time activities from HubSpot CRM"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${loadingActivities ? 'animate-spin' : ''}`} />
+                      <span>Refresh</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sub-Filters Matching HubSpot */}
+                <div className="flex flex-wrap items-center gap-1.5 pb-2 border-b border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setActivityTypeFilter('ALL')}
+                    className={`px-3 py-1 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      activityTypeFilter === 'ALL'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    All activities ({dealActivities.length})
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActivityTypeFilter('task')}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      activityTypeFilter === 'task'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <ListTodo className="w-3 h-3" />
+                    <span>Tasks ({activityCounts.task || 0})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActivityTypeFilter('note')}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      activityTypeFilter === 'note'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <MessageSquare className="w-3 h-3" />
+                    <span>Notes ({activityCounts.note || 0})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActivityTypeFilter('stage_change')}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                      activityTypeFilter === 'stage_change'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Activity className="w-3 h-3" />
+                    <span>Stage Changes ({activityCounts.stage_change || 0})</span>
+                  </button>
+                </div>
+
+                {/* Loading / Error States */}
+                {loadingActivities && (
+                  <div className="py-12 flex flex-col items-center justify-center gap-2.5 text-slate-400">
+                    <Loader2 className="w-7 h-7 text-[#EE3124] animate-spin" />
+                    <p className="text-xs font-semibold">Loading HubSpot deal activities...</p>
+                  </div>
+                )}
+
+                {activitiesError && (
+                  <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-rose-500" />
+                    <span>{activitiesError}</span>
+                  </div>
+                )}
+
+                {/* Timeline Cards Feed */}
+                {!loadingActivities && !activitiesError && (
+                  <>
+                    {filteredActivities.length === 0 ? (
+                      <div className="py-12 text-center space-y-2 bg-slate-50/60 rounded-2xl border border-dashed border-slate-200 p-6">
+                        <Activity className="w-8 h-8 text-slate-300 mx-auto" />
+                        <div className="font-extrabold text-xs text-slate-700">No activities found</div>
+                        <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+                          {activitySearchQuery
+                            ? `No activities match "${activitySearchQuery}".`
+                            : 'No tasks, notes, or activities are currently associated with this deal in HubSpot CRM.'}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+                        {filteredActivities.map((act) => {
+                          const dateObj = act.timestamp ? new Date(act.timestamp) : null;
+                          const formattedDate = dateObj
+                            ? `${dateObj.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })} at ${dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                            : '—';
+
+                          // Task Card
+                          if (act.type === 'task') {
+                            const isCompleted = act.status === 'COMPLETED';
+                            return (
+                              <div
+                                key={act.id}
+                                className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-all space-y-2"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                                      isCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                                    }`}>
+                                      <CheckCircle2 className="w-4 h-4" />
+                                    </div>
+                                    <div className="font-extrabold text-xs text-slate-900 leading-snug">
+                                      Task: {act.title}
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                                    {formattedDate}
+                                  </span>
+                                </div>
+
+                                {act.body && (
+                                  <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 leading-relaxed font-sans">
+                                    {act.body}
+                                  </div>
+                                )}
+
+                                <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-100">
+                                  <div className="flex items-center gap-1.5 text-slate-500 font-medium">
+                                    <User className="w-3 h-3 text-slate-400" />
+                                    <span>Assigned to: <strong className="text-slate-700">{getOwnerName(act.ownerId)}</strong></span>
+                                  </div>
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                    isCompleted ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                  }`}>
+                                    {isCompleted ? 'Completed' : 'Pending'}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // Note Card
+                          if (act.type === 'note') {
+                            return (
+                              <div
+                                key={act.id}
+                                className="p-3.5 rounded-2xl bg-amber-50/40 border border-amber-200/80 shadow-2xs space-y-2"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
+                                      <MessageSquare className="w-3.5 h-3.5" />
+                                    </div>
+                                    <div className="font-extrabold text-xs text-amber-950">
+                                      Note by {getOwnerName(act.ownerId)}
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                                    {formattedDate}
+                                  </span>
+                                </div>
+
+                                <div className="text-xs font-semibold text-slate-900 bg-white/95 p-2.5 rounded-xl border border-amber-200/60 leading-relaxed shadow-2xs">
+                                  {act.body || 'Empty note'}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // Stage Change Card
+                          if (act.type === 'stage_change') {
+                            return (
+                              <div
+                                key={act.id}
+                                className="p-3.5 rounded-2xl bg-blue-50/40 border border-blue-200/70 shadow-2xs space-y-1.5"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
+                                      <Activity className="w-3.5 h-3.5" />
+                                    </div>
+                                    <div className="font-extrabold text-xs text-blue-950">
+                                      Deal Activity
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                                    {formattedDate}
+                                  </span>
+                                </div>
+
+                                <div className="text-xs text-slate-700 font-medium flex items-center gap-2 flex-wrap">
+                                  <span>{getOwnerName(act.updatedBy)} moved deal to</span>
+                                  {getStageBadge(act.stageId, selectedDeal.pipeline)}
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // Creation Event Card
+                          if (act.type === 'created') {
+                            return (
+                              <div
+                                key={act.id}
+                                className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 shadow-2xs space-y-1.5"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-6 h-6 rounded-lg bg-orange-100 text-[#EE3124] flex items-center justify-center shrink-0">
+                                      <Sparkles className="w-3.5 h-3.5" />
+                                    </div>
+                                    <div className="font-extrabold text-xs text-slate-900">
+                                      Created
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
+                                    {formattedDate}
+                                  </span>
+                                </div>
+
+                                <div className="text-xs text-slate-600 font-medium">
+                                  This deal was created by <strong className="text-slate-900">{getOwnerName(act.ownerId)}</strong>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          // Generic fallback (call, email, meeting)
+                          return (
+                            <div
+                              key={act.id}
+                              className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="font-extrabold text-xs text-slate-900 capitalize">
+                                  {act.type}: {act.title}
+                                </div>
+                                <span className="text-[10px] text-slate-400 font-medium">
+                                  {formattedDate}
+                                </span>
+                              </div>
+                              {act.body && (
+                                <p className="text-xs text-slate-600">{act.body}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+
+              </div>
+            )}
 
             {/* Modal Actions Footer */}
             <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">

@@ -12,6 +12,7 @@ import {
     updateHubSpotDealHandlers,
     resolveDealHandlerFromHubSpot
 } from '../lib/hubspotDealHandlers.js';
+import { getDealActivities } from '../lib/dealActivities.js';
 
 let cachedPipelines = null;
 let lastPipelinesCheckTime = 0;
@@ -106,6 +107,18 @@ export default async function handler(req, res) {
             if (!token) {
                 console.error('❌ [API]', MISSING_TOKEN_ERROR);
                 return res.status(500).json({ error: MISSING_TOKEN_ERROR });
+            }
+
+            // Action: Fetch live timeline activities for a specific deal
+            if (req.query?.action === 'activities' && req.query?.dealId) {
+                try {
+                    const dealId = String(req.query.dealId);
+                    const activitiesData = await getDealActivities(dealId);
+                    return res.status(200).json({ success: true, ...activitiesData });
+                } catch (actErr) {
+                    console.error('🔥 [API/Deals] Failed to fetch deal activities:', actErr);
+                    return res.status(500).json({ error: actErr.message || 'Failed to load deal activities.' });
+                }
             }
 
             if (req.query?.refresh === 'true') {
