@@ -395,6 +395,16 @@ export default function DealsView({
   const [activitiesError, setActivitiesError] = useState('');
   const [activityTypeFilter, setActivityTypeFilter] = useState('ALL');
   const [activitySearchQuery, setActivitySearchQuery] = useState('');
+  const [collapsedActivityIds, setCollapsedActivityIds] = useState(new Set());
+
+  const toggleActivityCollapse = (id) => {
+    setCollapsedActivityIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const fetchActivitiesForDeal = async (dealId) => {
     if (!dealId) return;
@@ -3065,72 +3075,192 @@ export default function DealsView({
                           // Task Card
                           if (act.type === 'task') {
                             const isCompleted = act.status === 'COMPLETED';
+                            const isCollapsed = collapsedActivityIds.has(act.id);
+                            const dueDateObj = act.dueDate ? new Date(act.dueDate) : (act.timestamp ? new Date(act.timestamp) : null);
+                            const dueDay = dueDateObj ? String(dueDateObj.getDate()).padStart(2, '0') : '22';
+                            const dueMonth = dueDateObj ? String(dueDateObj.getMonth() + 1).padStart(2, '0') : '11';
+                            const dueYear = dueDateObj ? dueDateObj.getFullYear() : '2026';
+                            const dueDateStr = `${dueDay}/${dueMonth}/${dueYear}`;
+                            const dueTimeStr = dueDateObj ? dueDateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '11:20 AM';
+
                             return (
                               <div
                                 key={act.id}
-                                className="p-3.5 rounded-2xl bg-white border border-slate-200 shadow-2xs hover:border-slate-300 transition-all space-y-2"
+                                className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs hover:border-slate-300 transition-all space-y-3"
                               >
+                                {/* Header: Expand toggle, Title, Actions, Timestamp */}
                                 <div className="flex items-start justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
-                                      isCompleted ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                                    }`}>
-                                      <CheckCircle2 className="w-4 h-4" />
-                                    </div>
-                                    <div className="font-extrabold text-xs text-slate-900 leading-snug">
-                                      Task: {act.title}
-                                    </div>
+                                  <div 
+                                    onClick={() => toggleActivityCollapse(act.id)}
+                                    className="flex items-center gap-1.5 font-bold text-xs text-slate-800 cursor-pointer select-none hover:text-slate-950"
+                                  >
+                                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                                    <span>Task assigned to <strong className="text-slate-900">{getOwnerName(act.ownerId)}</strong> via UPW: No next activity</span>
                                   </div>
-                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
-                                    {formattedDate}
-                                  </span>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium shrink-0">
+                                    <span className="text-slate-500 hover:text-slate-700 cursor-pointer">Actions ▾</span>
+                                    <span>•</span>
+                                    <span>{formattedDate}</span>
+                                  </div>
                                 </div>
 
-                                {act.body && (
-                                  <div className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-100 leading-relaxed font-sans">
-                                    {act.body}
-                                  </div>
-                                )}
-
-                                <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-100">
-                                  <div className="flex items-center gap-1.5 text-slate-500 font-medium">
-                                    <User className="w-3 h-3 text-slate-400" />
-                                    <span>Assigned to: <strong className="text-slate-700">{getOwnerName(act.ownerId)}</strong></span>
-                                  </div>
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                    isCompleted ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                {/* Checkbox / Strikethrough Task Subject */}
+                                <div className="flex items-center gap-2.5 pl-5">
+                                  <div className={`w-5 h-5 rounded-full flex items-center justify-center shrink-0 ${
+                                    isCompleted ? 'bg-emerald-600 text-white shadow-xs shadow-emerald-600/30' : 'border-2 border-slate-300 text-transparent'
                                   }`}>
-                                    {isCompleted ? 'Completed' : 'Pending'}
+                                    <Check className="w-3.5 h-3.5" />
+                                  </div>
+                                  <span className={`text-xs ${
+                                    isCompleted ? 'line-through text-slate-500 font-semibold' : 'font-extrabold text-slate-900'
+                                  }`}>
+                                    {act.title}
                                   </span>
                                 </div>
+
+                                {!isCollapsed && (
+                                  <>
+                                    {/* Due date & Reminder row */}
+                                    <div className="flex flex-wrap items-center gap-4 text-xs pt-1 pl-5">
+                                      <div className="space-y-1">
+                                        <div className="text-[11px] font-semibold text-slate-500">Due date</div>
+                                        <div className="flex items-center gap-1.5">
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50/70 text-slate-700 font-medium text-xs">
+                                            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                            <span>{dueDateStr}</span>
+                                          </div>
+                                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50/70 text-slate-700 font-medium text-xs">
+                                            <Clock className="w-3.5 h-3.5 text-slate-400" />
+                                            <span>{dueTimeStr}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-1">
+                                        <div className="text-[11px] font-semibold text-slate-500">Reminder</div>
+                                        <div className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50/70 text-slate-700 font-medium text-xs cursor-pointer">
+                                          <span>No reminder</span>
+                                          <ChevronDown className="w-3 h-3 text-slate-400" />
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-1 pt-4">
+                                        <label className="inline-flex items-center gap-1.5 text-slate-600 text-xs font-medium cursor-pointer">
+                                          <input type="checkbox" disabled className="rounded border-slate-300 text-[#EE3124]" />
+                                          <span>Set to repeat</span>
+                                        </label>
+                                      </div>
+                                    </div>
+
+                                    {/* Task Attributes 5-column grid */}
+                                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-3 pl-5 border-t border-slate-100 text-xs">
+                                      <div>
+                                        <div className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Task stage</div>
+                                        <div className="font-extrabold text-slate-900 inline-flex items-center gap-1">
+                                          <span className={isCompleted ? 'text-emerald-700 font-bold' : 'text-amber-700 font-bold'}>
+                                            {isCompleted ? 'Completed' : 'Pending'}
+                                          </span>
+                                          <ChevronDown className="w-3 h-3 text-slate-400" />
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        <div className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Task Type</div>
+                                        <div className="font-extrabold text-slate-900">
+                                          {act.taskType || 'To-do'}
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        <div className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Priority</div>
+                                        <div className="font-extrabold text-slate-900 inline-flex items-center gap-1.5">
+                                          <span className={`w-2 h-2 rounded-full ${act.priority === 'HIGH' ? 'bg-rose-500' : act.priority === 'MEDIUM' ? 'bg-amber-500' : 'bg-slate-300'}`} />
+                                          <span>{act.priority && act.priority !== 'NONE' ? act.priority : 'None'}</span>
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        <div className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Queue</div>
+                                        <div className="font-extrabold text-slate-900 inline-flex items-center gap-1">
+                                          <span className="truncate">{act.queue || 'Upwork follow-ups'}</span>
+                                          <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+                                        </div>
+                                      </div>
+
+                                      <div>
+                                        <div className="text-[10px] uppercase font-bold text-slate-400 mb-0.5">Assigned to</div>
+                                        <div className="font-extrabold text-slate-900 truncate">
+                                          {getOwnerName(act.ownerId)}
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    {/* Task Notes Section */}
+                                    <div className="pt-2 pl-5 space-y-1.5">
+                                      <div className="text-[11px] font-bold text-slate-700">Task Notes</div>
+                                      <div className="p-3 bg-slate-50/90 rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed font-sans whitespace-pre-wrap relative group/note">
+                                        {act.body || 'This open Upwork deal has had no scheduled task or meeting for a day. Check the Upwork thread and either schedule the next touchpoint or move the deal to the right stage.'}
+                                        <Edit3 className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 bottom-2.5 opacity-60 hover:opacity-100 cursor-pointer" />
+                                      </div>
+
+                                      <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500 font-medium">
+                                        <button type="button" className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800 cursor-pointer">
+                                          <MessageSquare className="w-3 h-3 text-slate-400" />
+                                          <span>Add comment</span>
+                                        </button>
+                                        <div className="inline-flex items-center gap-1 text-slate-500 cursor-pointer hover:text-slate-800">
+                                          <span>1 association</span>
+                                          <ChevronDown className="w-3 h-3 text-slate-400" />
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             );
                           }
 
                           // Note Card
                           if (act.type === 'note') {
+                            const isCollapsed = collapsedActivityIds.has(act.id);
                             return (
                               <div
                                 key={act.id}
-                                className="p-3.5 rounded-2xl bg-amber-50/40 border border-amber-200/80 shadow-2xs space-y-2"
+                                className="p-4 rounded-2xl bg-white border border-slate-200/90 shadow-2xs space-y-2.5 hover:border-slate-300 transition-all"
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 flex items-center justify-center shrink-0">
-                                      <MessageSquare className="w-3.5 h-3.5" />
-                                    </div>
-                                    <div className="font-extrabold text-xs text-amber-950">
-                                      Note by {getOwnerName(act.ownerId)}
-                                    </div>
+                                <div className="flex items-center justify-between text-xs">
+                                  <div 
+                                    onClick={() => toggleActivityCollapse(act.id)}
+                                    className="flex items-center gap-1.5 font-extrabold text-slate-900 cursor-pointer select-none hover:text-amber-700"
+                                  >
+                                    <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isCollapsed ? '-rotate-90' : ''}`} />
+                                    <span>Note by {getOwnerName(act.ownerId)}</span>
                                   </div>
-                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
-                                    {formattedDate}
-                                  </span>
+                                  <div className="flex items-center gap-2 text-[11px] text-slate-400 font-medium">
+                                    <span className="text-slate-500 hover:text-slate-700 cursor-pointer">Actions ▾</span>
+                                    <span>•</span>
+                                    <span>{formattedDate}</span>
+                                  </div>
                                 </div>
 
-                                <div className="text-xs font-semibold text-slate-900 bg-white/95 p-2.5 rounded-xl border border-amber-200/60 leading-relaxed shadow-2xs">
-                                  {act.body || 'Empty note'}
-                                </div>
+                                {!isCollapsed && (
+                                  <>
+                                    <div className="p-3 bg-amber-50/30 rounded-xl border border-amber-200/60 text-xs text-slate-800 font-medium leading-relaxed font-sans">
+                                      {act.body || 'Empty note'}
+                                    </div>
+
+                                    <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium pt-1">
+                                      <button type="button" className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-800 cursor-pointer">
+                                        <MessageSquare className="w-3 h-3 text-slate-400" />
+                                        <span>Add comment</span>
+                                      </button>
+                                      <div className="inline-flex items-center gap-1 text-slate-500 cursor-pointer hover:text-slate-800">
+                                        <span>1 association</span>
+                                        <ChevronDown className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    </div>
+                                  </>
+                                )}
                               </div>
                             );
                           }
@@ -3140,26 +3270,24 @@ export default function DealsView({
                             return (
                               <div
                                 key={act.id}
-                                className="p-3.5 rounded-2xl bg-blue-50/40 border border-blue-200/70 shadow-2xs space-y-1.5"
+                                className="p-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-2xs flex items-center justify-between gap-3 text-xs"
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center shrink-0">
-                                      <Activity className="w-3.5 h-3.5" />
-                                    </div>
-                                    <div className="font-extrabold text-xs text-blue-950">
-                                      Deal Activity
-                                    </div>
-                                  </div>
-                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
-                                    {formattedDate}
+                                <div className="flex items-center gap-2.5 flex-wrap">
+                                  <span className="px-2.5 py-1 rounded-lg bg-blue-100 text-blue-700 font-black text-[11px]">
+                                    Deal Activity
                                   </span>
+                                  <span className="text-slate-700 font-medium">
+                                    <strong className="text-slate-900">{getOwnerName(act.updatedBy)}</strong> moved{' '}
+                                    <strong className="text-slate-900">{selectedDeal.dealname}</strong> to{' '}
+                                    {getStageBadge(act.stageId, selectedDeal.pipeline)}
+                                  </span>
+                                  <button type="button" className="text-blue-600 font-bold hover:underline cursor-pointer text-xs">
+                                    View details
+                                  </button>
                                 </div>
-
-                                <div className="text-xs text-slate-700 font-medium flex items-center gap-2 flex-wrap">
-                                  <span>{getOwnerName(act.updatedBy)} moved deal to</span>
-                                  {getStageBadge(act.stageId, selectedDeal.pipeline)}
-                                </div>
+                                <span className="text-[11px] text-slate-400 shrink-0 font-medium">
+                                  {formattedDate}
+                                </span>
                               </div>
                             );
                           }
@@ -3169,25 +3297,19 @@ export default function DealsView({
                             return (
                               <div
                                 key={act.id}
-                                className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 shadow-2xs space-y-1.5"
+                                className="p-3.5 rounded-2xl bg-white border border-slate-200/90 shadow-2xs flex items-center justify-between gap-3 text-xs"
                               >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-lg bg-orange-100 text-[#EE3124] flex items-center justify-center shrink-0">
-                                      <Sparkles className="w-3.5 h-3.5" />
-                                    </div>
-                                    <div className="font-extrabold text-xs text-slate-900">
-                                      Created
-                                    </div>
-                                  </div>
-                                  <span className="text-[10px] text-slate-400 font-medium shrink-0">
-                                    {formattedDate}
+                                <div className="flex items-center gap-2.5">
+                                  <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-black text-[11px]">
+                                    Created
+                                  </span>
+                                  <span className="text-slate-700 font-medium">
+                                    This deal was created by <strong className="text-slate-900">{getOwnerName(act.ownerId)}</strong>
                                   </span>
                                 </div>
-
-                                <div className="text-xs text-slate-600 font-medium">
-                                  This deal was created by <strong className="text-slate-900">{getOwnerName(act.ownerId)}</strong>
-                                </div>
+                                <span className="text-[11px] text-slate-400 shrink-0 font-medium">
+                                  {formattedDate}
+                                </span>
                               </div>
                             );
                           }
