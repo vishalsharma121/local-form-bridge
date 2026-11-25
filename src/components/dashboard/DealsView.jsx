@@ -24,7 +24,14 @@ import {
   Calendar,
   ExternalLink,
   Info,
-  ChevronDown
+  ChevronDown,
+  Eye,
+  DollarSign,
+  Clock,
+  Tag,
+  ShieldCheck,
+  Layers,
+  FileText
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -336,6 +343,44 @@ export default function DealsView({
       setIsAssigning(false);
     }
   };
+
+  // View deal details modal state
+  const [selectedDeal, setSelectedDeal] = useState(null);
+
+  // Helper to resolve human-readable owner name
+  const getOwnerName = (ownerId) => {
+    if (!ownerId) return 'Hub Dev';
+    const found = owners.find(o => String(o.id) === String(ownerId));
+    if (found) {
+      return found.name || `${found.firstName || ''} ${found.lastName || ''}`.trim() || found.email || 'Hub Dev';
+    }
+    return `Owner #${ownerId}`;
+  };
+
+  // Associated contacts for selected deal
+  const detailAssociatedContacts = useMemo(() => {
+    if (!selectedDeal) return [];
+    const dealNameLower = (selectedDeal.dealname || '').toLowerCase();
+    const dealIdStr = String(selectedDeal.id);
+    return contacts.filter(c => {
+      if (Array.isArray(c.associated_deal_ids) && c.associated_deal_ids.includes(dealIdStr)) return true;
+      if (c.associated_deal_id && String(c.associated_deal_id) === dealIdStr) return true;
+      if (c.name && c.name.length > 2 && dealNameLower.includes(c.name.toLowerCase())) return true;
+      return false;
+    });
+  }, [selectedDeal, contacts]);
+
+  // Associated company for selected deal
+  const detailAssociatedCompany = useMemo(() => {
+    if (!selectedDeal) return null;
+    const dealNameLower = (selectedDeal.dealname || '').toLowerCase();
+    const dealIdStr = String(selectedDeal.id);
+    return companies.find(comp => {
+      if (Array.isArray(comp.associated_deal_ids) && comp.associated_deal_ids.includes(dealIdStr)) return true;
+      if (comp.name && comp.name.length > 3 && dealNameLower.includes(comp.name.toLowerCase())) return true;
+      return false;
+    }) || null;
+  }, [selectedDeal, companies]);
 
   // Edit & Delete state for deals
   const [editingDeal, setEditingDeal] = useState(null);
@@ -1287,7 +1332,13 @@ export default function DealsView({
                             <Briefcase className="w-4 h-4" />
                           </div>
                           <div className="min-w-0">
-                            <span className="truncate max-w-[200px] font-extrabold block text-slate-900 text-xs sm:text-sm">{d.dealname || '—'}</span>
+                            <span 
+                              onClick={() => setSelectedDeal(d)}
+                              className="truncate max-w-[200px] font-extrabold block text-slate-900 text-xs sm:text-sm hover:text-amber-600 transition-colors cursor-pointer hover:underline"
+                              title="Click to view deal details"
+                            >
+                              {d.dealname || '—'}
+                            </span>
                             <span className="text-[10px] text-slate-400 font-medium block truncate max-w-[180px]">
                               {d.id ? `ID #${d.id}` : 'HubSpot Sales Pipeline'}
                             </span>
@@ -1399,40 +1450,46 @@ export default function DealsView({
 
                       <td className="px-4 py-3.5 text-right">
                         <div className="flex items-center justify-end">
-                          {canEdit || canDelete ? (
-                            <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-slate-100/80 border border-slate-200/80 shadow-2xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200">
-                              {canEdit && (
+                          <div className="inline-flex items-center gap-0.5 p-1 rounded-2xl bg-slate-100/80 border border-slate-200/80 shadow-2xs hover:bg-slate-100 hover:border-slate-300 transition-all duration-200">
+                            <button
+                              onClick={() => setSelectedDeal(d)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn cursor-pointer"
+                              title="View Deal Details"
+                            >
+                              <Eye className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
+                              <span>Details</span>
+                            </button>
+
+                            {canEdit && (
+                              <>
+                                <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
                                 <button
                                   onClick={() => handleStartEditDeal(d)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold text-slate-700 hover:text-amber-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn cursor-pointer"
+                                  className="p-1 rounded-xl text-slate-500 hover:text-blue-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 cursor-pointer"
                                   title="Edit Deal"
                                 >
-                                  <Edit3 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-amber-600 transition-colors" />
-                                  <span>Edit</span>
+                                  <Edit3 className="w-3.5 h-3.5" />
                                 </button>
-                              )}
+                              </>
+                            )}
 
-                              {canEdit && canDelete && (
-                                <div className="w-px h-3 bg-slate-200/80 my-auto" />
-                              )}
-
-                              {canDelete && (
+                            {canDelete && (
+                              <>
+                                <div className="w-px h-3.5 bg-slate-200/80 my-auto" />
                                 <button
                                   onClick={() => {
                                     setDeletingDeal(d);
                                     setActionError('');
                                     setActionSuccess('');
                                   }}
-                                  className="inline-flex items-center p-1 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 group/btn cursor-pointer"
+                                  className="p-1 rounded-xl text-slate-500 hover:text-rose-600 hover:bg-white transition-all shadow-none hover:shadow-2xs active:scale-95 cursor-pointer"
                                   title="Delete Deal"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5 text-slate-400 group-hover/btn:text-rose-600 transition-colors" />
+                                  <Trash2 className="w-3.5 h-3.5" />
                                 </button>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-slate-400 font-mono text-xs font-medium px-2 py-1">—</span>
-                          )}
+                              </>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>
@@ -2559,6 +2616,253 @@ export default function DealsView({
                 </div>
               </div>
             )}
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Deal Details Modal */}
+      {selectedDeal && createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 bg-slate-950/40 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 border border-slate-200 shadow-2xl space-y-5 my-auto max-h-[88vh] overflow-y-auto animate-modal-pop">
+            
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 text-white font-black text-base flex items-center justify-center shadow-md shadow-amber-500/20 shrink-0">
+                  <Briefcase className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-extrabold text-base sm:text-lg text-slate-900 leading-tight truncate">
+                    {selectedDeal.dealname || 'Unnamed Deal'}
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-2 mt-1">
+                    <span className="text-xs text-slate-500 font-semibold">ID: #{selectedDeal.id}</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-slate-100 text-slate-800 border border-slate-200">
+                      {getPipelineLabel(selectedDeal.pipeline)}
+                    </span>
+                    {getStageBadge(selectedDeal.dealstage, selectedDeal.pipeline)}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedDeal(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer shrink-0 ml-2"
+                title="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content Details */}
+            <div className="space-y-3.5 text-xs sm:text-sm">
+              
+              {/* Amount & Projected Close Date Banner */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/80 space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-emerald-700 flex items-center gap-1.5">
+                    <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Deal Amount</span>
+                  </div>
+                  <div className="text-xl font-black text-emerald-700 font-mono">
+                    ${Number(selectedDeal.amount || 0).toLocaleString()}
+                  </div>
+                  <div className="text-[10px] text-emerald-600 font-medium">HubSpot CRM Value</div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Projected Close Date</span>
+                  </div>
+                  <div className="font-extrabold text-slate-900 text-sm">
+                    {selectedDeal.closedate ? new Date(selectedDeal.closedate).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">Target close date</div>
+                </div>
+              </div>
+
+              {/* Deal Handled By & HubSpot Owner */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-purple-500" />
+                    <span>Deal Handled By</span>
+                  </div>
+                  <div>
+                    {getHandlerBadge(selectedDeal)}
+                  </div>
+                  {selectedDeal.assigned_user_email && (
+                    <div className="text-[11px] text-slate-500 truncate">{selectedDeal.assigned_user_email}</div>
+                  )}
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-blue-500" />
+                    <span>HubSpot Deal Owner</span>
+                  </div>
+                  <div className="font-extrabold text-slate-900">
+                    {getOwnerName(selectedDeal.hubspot_owner_id)}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-medium">HubSpot CRM Owner</div>
+                </div>
+              </div>
+
+              {/* Lead Source & Created By */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Lead Source</span>
+                  </div>
+                  <div>
+                    {getSourceBadge(selectedDeal.lead_source, selectedDeal.created_by)}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <Globe className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Created By / Ingestion</span>
+                  </div>
+                  <div>
+                    {getCreatorBadge(selectedDeal.created_by)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Deal Type & Priority */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-teal-500" />
+                    <span>Deal Type</span>
+                  </div>
+                  <div className="font-extrabold text-slate-900 capitalize">
+                    {selectedDeal.dealtype ? selectedDeal.dealtype.replace(/([a-z])([A-Z])/g, '$1 $2') : '—'}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-rose-500" />
+                    <span>Priority</span>
+                  </div>
+                  <div className="font-extrabold text-slate-900 capitalize">
+                    {selectedDeal.hs_priority || 'Normal'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Created Date & Time */}
+              {selectedDeal.createdate && (
+                <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Created Date & Time</span>
+                  </div>
+                  <div className="text-xs font-bold text-slate-700">
+                    {new Date(selectedDeal.createdate).toLocaleDateString()} at {new Date(selectedDeal.createdate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                </div>
+              )}
+
+              {/* Description / Notes if any */}
+              {selectedDeal.description && (
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-1.5">
+                  <div className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Description / Notes</span>
+                  </div>
+                  <div className="text-xs text-slate-800 whitespace-pre-wrap leading-relaxed max-h-32 overflow-y-auto font-sans p-2.5 bg-white rounded-xl border border-slate-200/80 font-medium">
+                    {selectedDeal.description}
+                  </div>
+                </div>
+              )}
+
+              {/* Associated Contacts */}
+              {detailAssociatedContacts.length > 0 && (
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-blue-50/70 via-indigo-50/30 to-slate-50 border border-blue-200 space-y-2">
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-blue-700 flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Associated Contact(s) ({detailAssociatedContacts.length})</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {detailAssociatedContacts.map(c => (
+                      <div key={c.id} className="p-2.5 rounded-xl bg-white border border-blue-100 flex items-center justify-between shadow-2xs">
+                        <div>
+                          <div className="font-bold text-xs text-slate-900">{c.name || 'Unnamed Contact'}</div>
+                          <div className="text-[10px] text-slate-500">{c.email || c.phone || 'No email'}</div>
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
+                          #{c.id}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Associated Company */}
+              {detailAssociatedCompany && (
+                <div className="p-3 rounded-2xl bg-gradient-to-r from-purple-50/70 via-pink-50/30 to-slate-50 border border-purple-200 space-y-1.5">
+                  <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-700 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-purple-600" />
+                    <span>Associated Company</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="font-extrabold text-xs text-slate-900">{detailAssociatedCompany.name}</div>
+                      <div className="text-[11px] text-slate-500">{detailAssociatedCompany.domain || 'No domain'}</div>
+                    </div>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200">
+                      ID: #{detailAssociatedCompany.id}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2.5">
+              <a
+                href={`https://app.hubspot.com/contacts/245317936/record/0-3/${selectedDeal.id}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-[#EE3124] bg-orange-50 hover:bg-orange-100 border border-orange-200/80 transition-colors shadow-2xs"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open in HubSpot CRM</span>
+              </a>
+
+              <div className="flex items-center gap-2">
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const d = selectedDeal;
+                      setSelectedDeal(null);
+                      handleStartEditDeal(d);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 transition-colors cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>Edit Deal</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedDeal(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 transition-colors shadow-md shadow-slate-900/10 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>,
         document.body
