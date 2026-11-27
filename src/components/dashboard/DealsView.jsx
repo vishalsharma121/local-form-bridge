@@ -232,6 +232,13 @@ export default function DealsView({
     return deals.filter(isUpworkDeal).length;
   }, [deals]);
 
+  // If the user has deals, but none of them are Upwork deals, automatically switch to 'ALL' so their deals are visible
+  useEffect(() => {
+    if (pipelineFilter === 'UPWORK' && deals.length > 0 && upworkDealsCount === 0) {
+      setPipelineFilter('ALL');
+    }
+  }, [deals.length, upworkDealsCount]);
+
   const unassignedDealsCount = useMemo(() => {
     return deals.filter(d => !d.assigned_user_id && !d.assigned_to).length;
   }, [deals]);

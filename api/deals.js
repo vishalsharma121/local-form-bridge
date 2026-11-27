@@ -284,8 +284,12 @@ export default async function handler(req, res) {
                 console.log(`🔒 [API/Deals] Filtered deals for team member "${auth.user?.email}": ${visibleDeals.length} of ${deals.length} deals visible`);
             }
 
-            console.log(`✅ [API] Returning ${visibleDeals.length} deals (total in CRM: ${rawDealsData.total}) and ${pipelines.length} pipelines`);
-            return res.status(200).json({ deals: visibleDeals, total: rawDealsData.total, pipelines });
+            const responseTotal = isSuperAdmin
+                ? (rawDealsData.total !== undefined ? rawDealsData.total : deals.length)
+                : visibleDeals.length;
+
+            console.log(`✅ [API] Returning ${visibleDeals.length} deals (total: ${responseTotal}, CRM total: ${rawDealsData.total}) and ${pipelines.length} pipelines`);
+            return res.status(200).json({ deals: visibleDeals, total: responseTotal, pipelines });
         } catch (err) {
             console.error('🔥 [API] Unexpected error:', err);
             return res.status(500).json({ error: 'Failed to load deals.' });

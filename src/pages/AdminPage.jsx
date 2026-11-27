@@ -177,7 +177,9 @@ function AdminDashboardContent() {
       if (res.ok) {
         const data = await res.json();
         setDeals(data.deals || []);
-        if (data.total !== undefined) setTotalDealsCount(data.total);
+        if (data.total !== undefined) {
+          setTotalDealsCount(isSuperAdmin ? data.total : (data.deals || []).length);
+        }
         if (data.pipelines) setPipelines(data.pipelines);
         return data;
       }
@@ -185,7 +187,7 @@ function AdminDashboardContent() {
       console.warn('Failed to load deals:', err);
     }
     return null;
-  }, [getAuthHeaders, logout, can]);
+  }, [getAuthHeaders, logout, can, isSuperAdmin]);
 
   const loadErrorLogs = useCallback(async () => {
     if (!can('view', 'logs')) {
@@ -415,7 +417,7 @@ function AdminDashboardContent() {
         setActiveTab={setActiveTab}
         contactsCount={totalContactsCount !== null ? totalContactsCount : filteredContacts.length}
         companiesCount={totalCompaniesCount !== null ? totalCompaniesCount : filteredCompanies.length}
-        dealsCount={totalDealsCount !== null ? totalDealsCount : filteredDeals.length}
+        dealsCount={!isSuperAdmin ? filteredDeals.length : (totalDealsCount !== null ? totalDealsCount : filteredDeals.length)}
         errorLogsCount={unresolvedErrorLogsCount}
         retryQueueCount={unresolvedErrorLogsCount}
         onLogout={logout}
@@ -466,7 +468,7 @@ function AdminDashboardContent() {
               deals={filteredDeals}
               totalContactsCount={totalContactsCount}
               totalCompaniesCount={totalCompaniesCount}
-              totalDealsCount={totalDealsCount}
+              totalDealsCount={!isSuperAdmin ? filteredDeals.length : totalDealsCount}
               contactStats={contactStats}
               errorLogs={filteredErrorLogs}
               activities={filteredActivities}
