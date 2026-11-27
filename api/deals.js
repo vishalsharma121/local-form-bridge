@@ -352,6 +352,14 @@ export default async function handler(req, res) {
                     );
                 }
 
+                // 3. Attach handler update note in HubSpot timeline
+                for (const id of targetIds) {
+                    const noteText = handlerIds.length > 0
+                        ? `📌 Deal Handlers Assigned via Local Form Bridge\n• Handled By: ${assignedTo || 'Team Members'}\n• Assigned By: ${auth.user?.name || 'Admin User'}\n• Timestamp: ${new Date().toLocaleString()}`
+                        : `📌 Deal Handlers Cleared via Local Form Bridge\n• Cleared By: ${auth.user?.name || 'Admin User'}\n• Timestamp: ${new Date().toLocaleString()}`;
+                    await createHubSpotNote({ objectType: 'deals', objectId: id, noteText }).catch(() => {});
+                }
+
                 const actionLabel = handlerIds.length > 0
                     ? `Assigned ${targetIds.length} deal(s) to ${assignedTo || 'team members'} (synced to HubSpot)`
                     : `Cleared handlers on ${targetIds.length} deal(s) (synced to HubSpot)`;
@@ -602,7 +610,7 @@ export default async function handler(req, res) {
             }
 
             // Attach creator Note in HubSpot
-            const noteContent = `📌 Deal Created via Local Form Bridge\n• Created By: ${userName} (${userEmail})\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: Admin Dashboard\n• Timestamp: ${new Date().toLocaleString()}`;
+            const noteContent = `📌 Deal Created via Local Form Bridge\n• Created By: ${userName} (${userEmail})\n• Handled By: ${finalAssignedTo || 'Unassigned'}\n• Role: ${formatRole(auth.user?.role)}\n• Lead Source: Admin Dashboard\n• Timestamp: ${new Date().toLocaleString()}`;
             await createHubSpotNote({ objectType: 'deals', objectId: dealId, noteText: noteContent });
 
             logSyncActivity({
