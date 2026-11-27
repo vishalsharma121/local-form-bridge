@@ -243,10 +243,26 @@ export default function DealsView({
     return deals.filter(d => !d.assigned_user_id && !d.assigned_to).length;
   }, [deals]);
 
-  // Render Deal Handled By badge
+  // Render Deal Handled By badge (supports single & multiple team members)
   const getHandlerBadge = (d) => {
-    if (d.assigned_to) {
-      const initials = d.assigned_to
+    const handlers = (d.assigned_handlers && d.assigned_handlers.length > 0)
+      ? d.assigned_handlers
+      : (d.assigned_to 
+          ? d.assigned_to.split(',').map(name => ({ id: d.assigned_user_id, name: name.trim() })).filter(h => h.name)
+          : []);
+
+    if (handlers.length === 0) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-50 text-amber-800 border border-amber-200/80 text-[11px] font-bold">
+          <UserPlus className="w-3 h-3 text-amber-600" />
+          <span>Needs Handler</span>
+        </span>
+      );
+    }
+
+    if (handlers.length === 1) {
+      const h = handlers[0];
+      const initials = (h.name || 'User')
         .split(' ')
         .map(n => n[0])
         .join('')
@@ -258,23 +274,110 @@ export default function DealsView({
           <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">
             {initials}
           </span>
-          <span className="truncate max-w-[120px]">{d.assigned_to}</span>
+          <span className="truncate max-w-[120px]">{h.name}</span>
         </span>
       );
     }
 
+    // Multiple handlers badge with stacked avatar bubbles
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-amber-50 text-amber-800 border border-amber-200/80 text-[11px] font-bold">
-        <UserPlus className="w-3 h-3 text-amber-600" />
-        <span>Needs Handler</span>
+      <span 
+        className="inline-flex items-center gap-1.5 px-2 py-1 rounded-xl bg-purple-50 text-purple-900 border border-purple-200/80 shadow-2xs font-extrabold text-xs"
+        title={handlers.map(h => h.name).join(', ')}
+      >
+        <div className="flex -space-x-1.5 overflow-hidden shrink-0">
+          {handlers.slice(0, 3).map((h, idx) => {
+            const initials = (h.name || 'U')
+              .split(' ')
+              .map(n => n[0])
+              .join('')
+              .substring(0, 2)
+              .toUpperCase();
+            return (
+              <span
+                key={h.id || idx}
+                className="inline-flex items-center justify-center w-5 h-5 rounded-full ring-1.5 ring-white bg-gradient-to-tr from-purple-600 to-indigo-600 text-white text-[9px] font-black shrink-0"
+              >
+                {initials}
+              </span>
+            );
+          })}
+        </div>
+        <span className="truncate max-w-[130px]">
+          {handlers[0].name.split(' ')[0]} +{handlers.length - 1}
+        </span>
       </span>
     );
   };
 
   const [assignStatusMsg, setAssignStatusMsg] = useState(null); // { type: 'success' | 'error', text: string }
 
-  // Assign deal to a team member (Two-Way Sync with HubSpot `deal_handled_by`)
-  const handleAssignDeal = async (dealId, member) => {
+  // Toggle deal handler in multi-select mode (Two-Way Sync with HubSpot `deal_handled_by`)
+  const handleToggleDealHandler = async (deal, member) => {
+    const currentIds = (deal.assigned_user_ids && deal.assigned_user_ids.length > 0)
+      ? deal.assigned_user_ids.map(Number)
+      : (deal.assigned_user_id ? [Number(deal.assigned_user_id)] : []);
+
+    const memberId = Number(member.id);
+    const isCurrentlySelected = currentIds.includes(memberId);
+
+    let nextIds = [];
+    if (isCurrentlySelected) {
+      nextIds = currentIds.filter(id => id !== memberId);
+    } else {
+      nextIds = [...currentIds, memberId];
+    }
+
+    const nextMembers = teamMembers.filter(m => nextIds.includes(Number(m.id)));
+    const nextNames = nextMembers.map(m => m.name).join(', ');
+    const nextEmails = nextMembers.map(m => m.email).join(', ');
+
+    // Optimistic in-memory update
+    deal.assigned_user_ids = nextIds;
+    deal.assigned_user_id = nextIds[0] || null;
+    deal.assigned_to = nextNames || null;
+    deal.assigned_handlers = nextMembers.map(m => ({ id: m.id, name: m.name, email: m.email }));
+
+    try {
+      setIsAssigning(true);
+      setAssignStatusMsg(null);
+      const res = await fetch('/api/deals', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          action: 'assign',
+          dealId: deal.id,
+          assignedUserIds: nextIds,
+          assignedTo: nextNames || null,
+          assignedUserEmail: nextEmails || null
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setAssignStatusMsg({
+          type: 'success',
+          text: nextIds.length > 0
+            ? `Updated handlers for "${deal.dealname}" (${nextNames}) & synced to HubSpot.`
+            : `Cleared handlers on "${deal.dealname}" & synced to HubSpot.`
+        });
+        setTimeout(() => setAssignStatusMsg(null), 3000);
+        if (onRefreshDeals) onRefreshDeals();
+      } else {
+        setAssignStatusMsg({
+          type: 'error',
+          text: data.error || 'Failed to sync deal handlers to HubSpot.'
+        });
+      }
+    } catch (err) {
+      console.error('Failed to toggle deal handler:', err);
+      setAssignStatusMsg({ type: 'error', text: err.message || 'Network error while assigning deal.' });
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  // Clear all handlers on a deal
+  const handleClearAllHandlers = async (dealId) => {
     try {
       setIsAssigning(true);
       setAssignStatusMsg(null);
@@ -284,31 +387,28 @@ export default function DealsView({
         body: JSON.stringify({
           action: 'assign',
           dealId,
-          assignedUserId: member ? member.id : null,
-          assignedTo: member ? member.name : null,
-          assignedUserEmail: member ? member.email : null
+          assignedUserIds: [],
+          assignedTo: null,
+          assignedUserEmail: null
         })
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        setAssignDropdownOpenDealId(null);
         setAssignStatusMsg({
           type: 'success',
-          text: member
-            ? `Assigned deal to ${member.name} & synced to HubSpot CRM.`
-            : 'Cleared deal handler & synced to HubSpot CRM.'
+          text: 'Cleared all handlers & synced to HubSpot CRM.'
         });
-        setTimeout(() => setAssignStatusMsg(null), 3500);
+        setTimeout(() => setAssignStatusMsg(null), 3000);
         if (onRefreshDeals) onRefreshDeals();
       } else {
         setAssignStatusMsg({
           type: 'error',
-          text: data.error || 'Failed to sync deal assignment to HubSpot.'
+          text: data.error || 'Failed to clear deal handlers.'
         });
       }
     } catch (err) {
-      console.error('Failed to assign deal:', err);
-      setAssignStatusMsg({ type: 'error', text: err.message || 'Network error while assigning deal.' });
+      console.error('Failed to clear handlers:', err);
+      setAssignStatusMsg({ type: 'error', text: err.message || 'Network error while clearing handlers.' });
     } finally {
       setIsAssigning(false);
     }
@@ -326,7 +426,7 @@ export default function DealsView({
         body: JSON.stringify({
           action: 'assign',
           dealIds: selectedDealIds,
-          assignedUserId: member ? member.id : null,
+          assignedUserIds: member ? [member.id] : [],
           assignedTo: member ? member.name : null,
           assignedUserEmail: member ? member.email : null
         })
@@ -477,6 +577,7 @@ export default function DealsView({
     closedate: '',
     hubspot_owner_id: '',
     assigned_user_id: '',
+    assigned_user_ids: [],
     assigned_to: '',
     deal_lead_source: [],
     dealtype: '',
@@ -503,6 +604,10 @@ export default function DealsView({
     const existingLeadSources = d.hubspot_lead_source
       ? String(d.hubspot_lead_source).split(';').map(s => s.trim()).filter(Boolean)
       : [];
+    const initialHandlerIds = Array.isArray(d.assigned_user_ids) && d.assigned_user_ids.length > 0
+      ? d.assigned_user_ids.map(Number)
+      : (d.assigned_user_id ? [Number(d.assigned_user_id)] : []);
+
     setEditingDeal(d);
     setEditDealData({
       dealname: d.dealname || '',
@@ -511,7 +616,8 @@ export default function DealsView({
       amount: d.amount || '',
       closedate: formattedCloseDate,
       hubspot_owner_id: d.hubspot_owner_id || '',
-      assigned_user_id: d.assigned_user_id || '',
+      assigned_user_id: initialHandlerIds[0] || '',
+      assigned_user_ids: initialHandlerIds,
       assigned_to: d.assigned_to || '',
       deal_lead_source: existingLeadSources,
       dealtype: d.dealtype || '',
@@ -540,9 +646,13 @@ export default function DealsView({
     setActionSuccess('');
 
     try {
-      const selectedMemberObj = editDealData.assigned_user_id
-        ? teamMembers.find(m => String(m.id) === String(editDealData.assigned_user_id))
-        : null;
+      const assignedIds = Array.isArray(editDealData.assigned_user_ids)
+        ? editDealData.assigned_user_ids.map(Number)
+        : (editDealData.assigned_user_id ? [Number(editDealData.assigned_user_id)] : []);
+
+      const assignedMembers = teamMembers.filter(m => assignedIds.includes(Number(m.id)));
+      const assignedNames = assignedMembers.map(m => m.name).join(', ');
+      const assignedEmails = assignedMembers.map(m => m.email).filter(Boolean);
 
       const res = await fetch('/api/deals', {
         method: 'PUT',
@@ -555,9 +665,11 @@ export default function DealsView({
           amount: editDealData.amount,
           closedate: editDealData.closedate || '',
           hubspot_owner_id: editDealData.hubspot_owner_id || '',
-          assigned_user_id: editDealData.assigned_user_id || null,
-          assigned_to: editDealData.assigned_to || selectedMemberObj?.name || null,
-          assigned_user_email: selectedMemberObj?.email || null,
+          assigned_user_id: assignedIds[0] || null,
+          assigned_user_ids: assignedIds,
+          assigned_to: assignedNames || null,
+          assigned_user_email: assignedEmails[0] || null,
+          assigned_user_emails: assignedEmails,
           deal_lead_source: editDealData.deal_lead_source,
           dealtype: editDealData.dealtype || '',
           hs_priority: editDealData.hs_priority || ''
@@ -568,6 +680,21 @@ export default function DealsView({
       if (!res.ok) {
         throw new Error(data.error || data.message || 'Failed to update deal in HubSpot.');
       }
+
+      // Optimistic in-memory deal update
+      setDeals(prev => prev.map(item => {
+        if (item.id === editingDeal.id) {
+          return {
+            ...item,
+            ...editDealData,
+            assigned_user_ids: assignedIds,
+            assigned_user_id: assignedIds[0] || null,
+            assigned_to: assignedNames || null,
+            assigned_handlers: assignedMembers.map(m => ({ id: m.id, name: m.name, email: m.email }))
+          };
+        }
+        return item;
+      }));
 
       setActionSuccess('Deal updated successfully in HubSpot CRM!');
       setTimeout(() => {
@@ -622,6 +749,7 @@ export default function DealsView({
     closedate: getDefaultCloseDate(),
     hubspot_owner_id: '',
     assigned_user_id: '',
+    assigned_user_ids: [],
     deal_lead_source: [],
     dealtype: '',
     hs_priority: '',
@@ -938,6 +1066,8 @@ export default function DealsView({
       amount: '',
       closedate: getDefaultCloseDate(),
       hubspot_owner_id: '',
+      assigned_user_id: '',
+      assigned_user_ids: [],
       dealtype: '',
       hs_priority: '',
       contactId: '',
@@ -999,11 +1129,12 @@ export default function DealsView({
         handlerFilter === 'ALL'
           ? true
           : handlerFilter === 'UNASSIGNED'
-          ? (!d.assigned_user_id && !d.assigned_to)
+          ? (!d.assigned_user_id && !d.assigned_to && (!d.assigned_user_ids || d.assigned_user_ids.length === 0))
           : handlerFilter === 'ASSIGNED'
-          ? Boolean(d.assigned_user_id || d.assigned_to)
-          : (d.assigned_user_id && String(d.assigned_user_id) === String(handlerFilter)) ||
-            (d.assigned_to && d.assigned_to.toLowerCase().trim() === String(handlerFilter).toLowerCase().trim());
+          ? Boolean(d.assigned_user_id || d.assigned_to || (d.assigned_user_ids && d.assigned_user_ids.length > 0))
+          : (d.assigned_user_ids && d.assigned_user_ids.map(String).includes(String(handlerFilter))) ||
+            (d.assigned_user_id && String(d.assigned_user_id) === String(handlerFilter)) ||
+            (d.assigned_to && d.assigned_to.toLowerCase().includes(String(handlerFilter).toLowerCase()));
 
       return matchesQuery && matchesPipeline && matchesStage && matchesSource && matchesHandler;
     });
@@ -1046,9 +1177,13 @@ export default function DealsView({
         }
       }
 
-      const chosenHandler = newDealData.assigned_user_id
-        ? teamMembers.find(m => String(m.id) === String(newDealData.assigned_user_id))
-        : null;
+      const assignedIds = Array.isArray(newDealData.assigned_user_ids) && newDealData.assigned_user_ids.length > 0
+        ? newDealData.assigned_user_ids.map(Number)
+        : (newDealData.assigned_user_id ? [Number(newDealData.assigned_user_id)] : []);
+
+      const chosenMembers = teamMembers.filter(m => assignedIds.includes(Number(m.id)));
+      const chosenNames = chosenMembers.map(m => m.name).join(', ');
+      const chosenEmails = chosenMembers.map(m => m.email).filter(Boolean);
 
       // Create Deal with all HubSpot native properties
       const dealRes = await fetch('/api/deals', {
@@ -1061,9 +1196,11 @@ export default function DealsView({
           amount: newDealData.amount || '0',
           closedate: newDealData.closedate || null,
           hubspot_owner_id: newDealData.hubspot_owner_id || null,
-          assigned_user_id: newDealData.assigned_user_id || null,
-          assigned_to: chosenHandler?.name || null,
-          assigned_user_email: chosenHandler?.email || null,
+          assigned_user_id: assignedIds[0] || null,
+          assigned_user_ids: assignedIds,
+          assigned_to: chosenNames || null,
+          assigned_user_email: chosenEmails[0] || null,
+          assigned_user_emails: chosenEmails,
           deal_lead_source: newDealData.deal_lead_source || [],
           dealtype: newDealData.dealtype || null,
           hs_priority: newDealData.hs_priority || null,
@@ -1088,6 +1225,7 @@ export default function DealsView({
           closedate: getDefaultCloseDate(),
           hubspot_owner_id: '',
           assigned_user_id: '',
+          assigned_user_ids: [],
           deal_lead_source: [],
           dealtype: '',
           hs_priority: '',
@@ -1453,49 +1591,93 @@ export default function DealsView({
                                 className="fixed inset-0 z-40" 
                                 onClick={() => setAssignDropdownOpenDealId(null)}
                               />
-                              <div className="absolute left-0 mt-1.5 w-60 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 py-1.5 animate-modal-pop text-xs">
-                                <div className="px-3 py-1.5 border-b border-slate-100 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                                  <span>Assign Deal Handler</span>
-                                  {isAssigning && <Loader2 className="w-3 h-3 animate-spin text-purple-600" />}
+                              <div className="absolute left-0 mt-1.5 w-64 bg-white rounded-2xl shadow-2xl border border-slate-200 z-50 py-2 animate-modal-pop text-xs">
+                                <div className="px-3 pb-2 border-b border-slate-100 flex items-center justify-between">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">
+                                      Assign Handlers
+                                    </span>
+                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-purple-100 text-purple-700">
+                                      Multi-select
+                                    </span>
+                                  </div>
+                                  {isAssigning ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600" />
+                                  ) : (
+                                    <span className="text-[10px] font-bold text-slate-400">
+                                      {((d.assigned_user_ids?.length) || (d.assigned_to ? d.assigned_to.split(',').length : 0))} selected
+                                    </span>
+                                  )}
                                 </div>
-                                <div className="max-h-48 overflow-y-auto py-1">
+                                <div className="max-h-52 overflow-y-auto py-1 px-1 space-y-0.5">
                                   {teamMembers.length === 0 ? (
                                     <div className="px-3 py-2 text-slate-400 text-xs italic">No active team members</div>
                                   ) : (
                                     teamMembers.map((m) => {
-                                      const isSelected = String(d.assigned_user_id) === String(m.id) || d.assigned_to === m.name;
+                                      const currentIds = (d.assigned_user_ids && d.assigned_user_ids.length > 0)
+                                        ? d.assigned_user_ids.map(Number)
+                                        : (d.assigned_user_id ? [Number(d.assigned_user_id)] : []);
+                                      const isSelected = currentIds.includes(Number(m.id)) || (d.assigned_to && d.assigned_to.includes(m.name));
+                                      const initials = (m.name || 'U')
+                                        .split(' ')
+                                        .map(n => n[0])
+                                        .join('')
+                                        .substring(0, 2)
+                                        .toUpperCase();
+
                                       return (
-                                        <button
+                                        <div
                                           key={m.id}
-                                          type="button"
-                                          disabled={isAssigning}
-                                          onClick={() => handleAssignDeal(d.id, m)}
-                                          className={`w-full text-left px-3 py-1.5 flex items-center justify-between hover:bg-purple-50 transition-colors cursor-pointer ${
-                                            isSelected ? 'font-black text-purple-700 bg-purple-50/60' : 'text-slate-700 font-medium'
+                                          onClick={() => handleToggleDealHandler(d, m)}
+                                          className={`w-full text-left px-2.5 py-1.5 rounded-xl flex items-center justify-between transition-all cursor-pointer select-none ${
+                                            isSelected 
+                                              ? 'bg-purple-50 text-purple-900 font-bold border border-purple-200/60 shadow-2xs' 
+                                              : 'text-slate-700 hover:bg-slate-50 font-medium'
                                           }`}
                                         >
-                                          <div className="truncate pr-2">
-                                            <div className="font-bold truncate">{m.name}</div>
-                                            <div className="text-[10px] text-slate-400 truncate">{m.email}</div>
+                                          <div className="flex items-center gap-2 truncate pr-2">
+                                            {/* Multi-select Checkbox */}
+                                            <div className={`w-4 h-4 rounded-md border flex items-center justify-center shrink-0 transition-all ${
+                                              isSelected 
+                                                ? 'bg-purple-600 border-purple-600 text-white shadow-2xs' 
+                                                : 'border-slate-300 bg-white hover:border-purple-400'
+                                            }`}>
+                                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                                            </div>
+                                            {/* Avatar */}
+                                            <span className="w-5 h-5 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 text-white text-[9px] font-black flex items-center justify-center shrink-0">
+                                              {initials}
+                                            </span>
+                                            {/* Details */}
+                                            <div className="truncate">
+                                              <div className="text-xs truncate">{m.name}</div>
+                                              <div className="text-[10px] text-slate-400 font-normal truncate">{m.email}</div>
+                                            </div>
                                           </div>
-                                          {isSelected && <Check className="w-3.5 h-3.5 text-purple-600 shrink-0" />}
-                                        </button>
+                                        </div>
                                       );
                                     })
                                   )}
                                 </div>
-                                {d.assigned_to && (
-                                  <div className="border-t border-slate-100 pt-1">
+                                <div className="border-t border-slate-100 pt-1.5 px-3 flex items-center justify-between">
+                                  {(d.assigned_to || (d.assigned_user_ids && d.assigned_user_ids.length > 0)) ? (
                                     <button
                                       type="button"
                                       disabled={isAssigning}
-                                      onClick={() => handleAssignDeal(d.id, null)}
-                                      className="w-full text-left px-3 py-1.5 text-rose-600 font-bold hover:bg-rose-50 transition-colors cursor-pointer text-[11px]"
+                                      onClick={() => handleClearAllHandlers(d.id)}
+                                      className="text-rose-600 hover:text-rose-800 font-bold text-[11px] cursor-pointer hover:underline disabled:opacity-50"
                                     >
-                                      Clear Handler (Unassign)
+                                      Clear All (Unassign)
                                     </button>
-                                  </div>
-                                )}
+                                  ) : <span />}
+                                  <button
+                                    type="button"
+                                    onClick={() => setAssignDropdownOpenDealId(null)}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] cursor-pointer shadow-2xs"
+                                  >
+                                    Done
+                                  </button>
+                                </div>
                               </div>
                             </>
                           )}
@@ -1804,26 +1986,50 @@ export default function DealsView({
                     </div>
                   </div>
 
-                  {/* 6b. Deal Handled By (Admins) */}
+                  {/* 6b. Deal Handled By (Admins - Multi-Select) */}
                   {isSuperAdmin && (
                     <div>
-                      <label className="block text-xs font-bold text-slate-800 mb-1.5">
-                        Deal Handled By
-                      </label>
-                      <div className="relative">
-                        <select
-                          value={newDealData.assigned_user_id}
-                          onChange={(e) => setNewDealData({ ...newDealData, assigned_user_id: e.target.value })}
-                          className="w-full appearance-none px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#00A389]/20 focus:border-[#00A389] transition-all cursor-pointer text-xs sm:text-sm pr-9"
-                        >
-                          <option value="">-- Unassigned (Needs Handler) --</option>
-                          {teamMembers.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name} ({m.email})
-                            </option>
-                          ))}
-                        </select>
-                        <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="block text-xs font-bold text-slate-800">
+                          Deal Handled By (Assign Sales Team Members)
+                        </label>
+                        <span className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                          {(newDealData.assigned_user_ids || []).length} selected
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50/80 border border-slate-200 rounded-xl max-h-40 overflow-y-auto">
+                        {teamMembers.length === 0 ? (
+                          <div className="text-xs text-slate-400 italic py-1 px-1">No active team members</div>
+                        ) : (
+                          teamMembers.map((m) => {
+                            const isChecked = (newDealData.assigned_user_ids || []).includes(Number(m.id));
+                            return (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => {
+                                  const current = newDealData.assigned_user_ids || [];
+                                  const next = isChecked
+                                    ? current.filter(id => id !== Number(m.id))
+                                    : [...current, Number(m.id)];
+                                  setNewDealData({
+                                    ...newDealData,
+                                    assigned_user_ids: next,
+                                    assigned_user_id: next[0] || ''
+                                  });
+                                }}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                                  isChecked
+                                    ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                                    : 'bg-white text-slate-700 border-slate-200 hover:border-purple-300 hover:bg-purple-50/40'
+                                }`}
+                              >
+                                {isChecked && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
+                                <span>{m.name}</span>
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
                     </div>
                   )}
@@ -2606,28 +2812,48 @@ export default function DealsView({
 
                 {isSuperAdmin && (
                   <div>
-                    <label className="block text-xs font-bold text-slate-800 mb-1">
-                      Deal Handled By (Assigned Sales Team Member)
-                    </label>
-                    <select
-                      value={editDealData.assigned_user_id || ''}
-                      onChange={(e) => {
-                        const mem = teamMembers.find(m => String(m.id) === String(e.target.value));
-                        setEditDealData({
-                          ...editDealData,
-                          assigned_user_id: e.target.value || '',
-                          assigned_to: mem ? mem.name : ''
-                        });
-                      }}
-                      className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EE3124]/20 focus:border-[#EE3124] transition-all cursor-pointer text-xs font-bold"
-                    >
-                      <option value="">-- Unassigned (Needs Handler) --</option>
-                      {teamMembers.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name} ({m.email})
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-800">
+                        Deal Handled By (Assigned Sales Team Members)
+                      </label>
+                      <span className="text-[11px] font-bold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-full border border-purple-200">
+                        {(editDealData.assigned_user_ids || []).length} selected
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 p-2 bg-slate-50/80 border border-slate-200 rounded-xl max-h-40 overflow-y-auto">
+                      {teamMembers.length === 0 ? (
+                        <div className="text-xs text-slate-400 italic py-1 px-1">No active team members</div>
+                      ) : (
+                        teamMembers.map((m) => {
+                          const isChecked = (editDealData.assigned_user_ids || []).includes(Number(m.id));
+                          return (
+                            <button
+                              key={m.id}
+                              type="button"
+                              onClick={() => {
+                                const current = editDealData.assigned_user_ids || [];
+                                const next = isChecked
+                                  ? current.filter(id => id !== Number(m.id))
+                                  : [...current, Number(m.id)];
+                                setEditDealData({
+                                  ...editDealData,
+                                  assigned_user_ids: next,
+                                  assigned_user_id: next[0] || ''
+                                });
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer inline-flex items-center gap-1.5 ${
+                                isChecked
+                                  ? 'bg-purple-600 text-white border-purple-600 shadow-2xs'
+                                  : 'bg-white text-slate-700 border-slate-200 hover:border-purple-300 hover:bg-purple-50/40'
+                              }`}
+                            >
+                              {isChecked && <Check className="w-3.5 h-3.5 stroke-[2.5]" />}
+                              <span>{m.name}</span>
+                            </button>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 )}
 

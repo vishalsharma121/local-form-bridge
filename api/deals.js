@@ -163,6 +163,9 @@ export default async function handler(req, res) {
                 const assignedTo = resolvedHandler.assigned_to;
                 const assignedUserId = resolvedHandler.assigned_user_id;
                 const assignedUserEmail = resolvedHandler.assigned_user_email;
+                const assignedUserIds = resolvedHandler.assigned_user_ids || [];
+                const assignedUserEmails = resolvedHandler.assigned_user_emails || [];
+                const assignedHandlers = resolvedHandler.assigned_handlers || [];
                 const assignedAt = srcInfo?.assigned_at || null;
                 const assignedBy = srcInfo?.assigned_by || null;
                 const description = d.properties.description || '';
@@ -215,6 +218,9 @@ export default async function handler(req, res) {
                     assigned_to: assignedTo,
                     assigned_user_id: assignedUserId,
                     assigned_user_email: assignedUserEmail,
+                    assigned_user_ids: assignedUserIds,
+                    assigned_user_emails: assignedUserEmails,
+                    assigned_handlers: assignedHandlers,
                     assigned_at: assignedAt,
                     assigned_by: assignedBy,
                     description: description,
@@ -262,10 +268,13 @@ export default async function handler(req, res) {
                 const userName = (auth.user?.name || '').toLowerCase().trim();
 
                 visibleDeals = deals.filter((d) => {
-                    // 1. Explicit Assignment to Team Member
-                    const isAssignedId = d.assigned_user_id && Number(d.assigned_user_id) === userId;
-                    const isAssignedEmail = d.assigned_user_email && d.assigned_user_email.toLowerCase().trim() === userEmail;
-                    const isAssignedName = d.assigned_to && d.assigned_to.toLowerCase().trim() === userName;
+                    // 1. Explicit Assignment to Team Member (single or multi-handler)
+                    const isAssignedId = (d.assigned_user_ids && d.assigned_user_ids.map(Number).includes(userId)) ||
+                                         (d.assigned_user_id && Number(d.assigned_user_id) === userId);
+                    const isAssignedEmail = (d.assigned_user_emails && d.assigned_user_emails.includes(userEmail)) ||
+                                            (d.assigned_user_email && d.assigned_user_email.toLowerCase().trim() === userEmail);
+                    const isAssignedName = (d.assigned_handlers && d.assigned_handlers.some(h => (h.name || '').toLowerCase().trim() === userName)) ||
+                                           (d.assigned_to && d.assigned_to.toLowerCase().includes(userName));
 
                     // 2. Self-Created Deals
                     const matchCreatorId = d.created_by_user_id && Number(d.created_by_user_id) === userId;
@@ -312,15 +321,19 @@ export default async function handler(req, res) {
                     return res.status(403).json({ error: 'Permission denied. Only managers/admins can assign deals.' });
                 }
 
-                const { dealId, dealIds, assignedUserId, assignedTo, assignedUserEmail } = req.body || {};
+                const { dealId, dealIds, assignedUserId, assignedUserIds, assignedTo, assignedUserEmail } = req.body || {};
                 const targetIds = Array.isArray(dealIds) ? dealIds : dealId ? [dealId] : [];
 
                 if (targetIds.length === 0) {
                     return res.status(400).json({ error: 'Please provide at least one deal ID to assign.' });
                 }
 
+                const handlerIds = Array.isArray(assignedUserIds)
+                    ? assignedUserIds
+                    : (assignedUserId ? [assignedUserId] : []);
+
                 // 1. Write `deal_handled_by` directly to HubSpot CRM (single or batch)
-                const hsSync = await updateHubSpotDealHandlers(targetIds, assignedUserId || null);
+                const hsSync = await updateHubSpotDealHandlers(targetIds, handlerIds);
                 if (!hsSync.success) {
                     return res.status(hsSync.status || 502).json({
                         error: `Failed to sync "Deal Handled By" to HubSpot CRM: ${hsSync.error}`
@@ -328,19 +341,20 @@ export default async function handler(req, res) {
                 }
 
                 // 2. Mirror assignment metadata to Neon Postgres audit table
+                const primaryUserId = handlerIds[0] ? Number(handlerIds[0]) : null;
                 for (const id of targetIds) {
                     await assignDeal(
                         id,
-                        assignedUserId || null,
+                        primaryUserId,
                         assignedTo || null,
                         assignedUserEmail || null,
                         auth.user?.name || 'Admin User'
                     );
                 }
 
-                const actionLabel = assignedUserId
-                    ? `Assigned ${targetIds.length} deal(s) to ${assignedTo || 'team member'} (synced to HubSpot)`
-                    : `Cleared handler on ${targetIds.length} deal(s) (synced to HubSpot)`;
+                const actionLabel = handlerIds.length > 0
+                    ? `Assigned ${targetIds.length} deal(s) to ${assignedTo || 'team members'} (synced to HubSpot)`
+                    : `Cleared handlers on ${targetIds.length} deal(s) (synced to HubSpot)`;
 
                 await logSyncActivity({
                     type: 'deal',
@@ -468,16 +482,19 @@ export default async function handler(req, res) {
             // Set HubSpot `deal_handled_by` on newly created deals
             const isCreatorAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
             const creatorUid = auth.user?.userId || auth.user?.id || null;
-            const finalAssignedUserId = assigned_user_id ? Number(assigned_user_id) : (!isCreatorAdmin && creatorUid ? Number(creatorUid) : null);
-            const finalAssignedTo = assigned_user_id ? (assigned_to || null) : (!isCreatorAdmin ? userName : null);
-            const finalAssignedEmail = assigned_user_id ? (assigned_user_email || null) : (!isCreatorAdmin ? userEmail : null);
+            const handlerIds = Array.isArray(req.body?.assigned_user_ids) && req.body.assigned_user_ids.length > 0
+                ? req.body.assigned_user_ids.map(Number).filter(Boolean)
+                : (assigned_user_id ? [Number(assigned_user_id)] : (!isCreatorAdmin && creatorUid ? [Number(creatorUid)] : []));
 
-            if (finalAssignedUserId) {
-                const optVal = getHandlerOptionValue(finalAssignedUserId);
-                if (optVal) {
-                    await ensureHandlerOptionInHubSpot(finalAssignedUserId);
-                    properties[HUBSPOT_HANDLER_PROPERTY] = optVal;
+            const finalAssignedUserId = handlerIds[0] || null;
+            const finalAssignedTo = assigned_to || (!isCreatorAdmin ? userName : null);
+            const finalAssignedEmail = assigned_user_email || (!isCreatorAdmin ? userEmail : null);
+
+            if (handlerIds.length > 0) {
+                for (const hid of handlerIds) {
+                    await ensureHandlerOptionInHubSpot(hid);
                 }
+                properties[HUBSPOT_HANDLER_PROPERTY] = handlerIds.map(hid => getHandlerOptionValue(hid)).join(';');
             }
 
             const safeHubSpotFetch = async (url, opts) => {
@@ -675,11 +692,12 @@ export default async function handler(req, res) {
 
                 const hsHandlerRaw = String(oldRecord[HUBSPOT_HANDLER_PROPERTY] || '').trim().toLowerCase();
                 const expectedOptVal = getHandlerOptionValue(userId).toLowerCase();
+                const rawParts = hsHandlerRaw.split(';').map(p => p.trim());
                 const isHubSpotAssigned = Boolean(
                     hsHandlerRaw && (
-                        (expectedOptVal && hsHandlerRaw === expectedOptVal) ||
-                        (userEmail && hsHandlerRaw === userEmail) ||
-                        (userName && hsHandlerRaw === userName)
+                        (expectedOptVal && (hsHandlerRaw === expectedOptVal || rawParts.includes(expectedOptVal))) ||
+                        (userEmail && (hsHandlerRaw === userEmail || rawParts.includes(userEmail))) ||
+                        (userName && (hsHandlerRaw === userName || rawParts.includes(userName)))
                     )
                 );
 
@@ -730,17 +748,22 @@ export default async function handler(req, res) {
                     : String(deal_lead_source || '').trim();
             }
 
-            if (isSuperAdmin && (req.body?.assigned_user_id !== undefined || req.body?.assigned_to !== undefined)) {
-                const nextHandlerId = req.body.assigned_user_id ? Number(req.body.assigned_user_id) : null;
-                if (nextHandlerId) {
-                    await ensureHandlerOptionInHubSpot(nextHandlerId);
-                    properties[HUBSPOT_HANDLER_PROPERTY] = getHandlerOptionValue(nextHandlerId);
+            if (isSuperAdmin && (req.body?.assigned_user_ids !== undefined || req.body?.assigned_user_id !== undefined || req.body?.assigned_to !== undefined)) {
+                const handlerIds = Array.isArray(req.body.assigned_user_ids)
+                    ? req.body.assigned_user_ids.map(Number).filter(Boolean)
+                    : (req.body.assigned_user_id ? [Number(req.body.assigned_user_id)] : []);
+
+                if (handlerIds.length > 0) {
+                    for (const hid of handlerIds) {
+                        await ensureHandlerOptionInHubSpot(hid);
+                    }
+                    properties[HUBSPOT_HANDLER_PROPERTY] = handlerIds.map(hid => getHandlerOptionValue(hid)).join(';');
                 } else {
                     properties[HUBSPOT_HANDLER_PROPERTY] = '';
                 }
                 await assignDeal(
                     dealId,
-                    nextHandlerId,
+                    handlerIds[0] || null,
                     req.body.assigned_to || null,
                     req.body.assigned_user_email || null,
                     auth.user?.name || 'Admin User'
