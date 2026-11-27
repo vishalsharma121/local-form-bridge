@@ -222,24 +222,6 @@ export default function DealsView({
     );
   };
 
-  // Helper to test if a deal is an Upwork deal (by pipeline or title)
-  const isUpworkDeal = (d) => {
-    const pipe = (d.pipeline || '').toLowerCase();
-    const name = (d.dealname || '').toLowerCase();
-    return pipe.includes('upwork') || name.startsWith('upwork') || name.includes('upwork');
-  };
-
-  const upworkDealsCount = useMemo(() => {
-    return deals.filter(isUpworkDeal).length;
-  }, [deals]);
-
-  // If the user has deals, but none of them are Upwork deals, automatically switch to 'ALL' so their deals are visible
-  useEffect(() => {
-    if (pipelineFilter === 'UPWORK' && deals.length > 0 && upworkDealsCount === 0) {
-      setPipelineFilter('ALL');
-    }
-  }, [deals.length, upworkDealsCount]);
-
   const unassignedDealsCount = useMemo(() => {
     return deals.filter(d => !d.assigned_user_id && !d.assigned_to).length;
   }, [deals]);
@@ -1150,8 +1132,6 @@ export default function DealsView({
       const matchesPipeline =
         pipelineFilter === 'ALL'
           ? true
-          : pipelineFilter === 'UPWORK'
-          ? isUpworkDeal(d)
           : d.pipeline === pipelineFilter;
 
       const matchesStage = stageFilter === 'ALL' || d.dealstage === stageFilter;
@@ -1328,7 +1308,6 @@ export default function DealsView({
               className="bg-transparent text-slate-800 font-extrabold focus:outline-none cursor-pointer"
             >
               <option value="ALL">All Pipelines ({deals.length})</option>
-              <option value="UPWORK">Upwork Deals Only ({upworkDealsCount})</option>
               {activePipelines.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
@@ -1816,8 +1795,8 @@ export default function DealsView({
                     {Math.min(currentPage * pageSize, filteredDeals.length).toLocaleString()}
                   </span>{' '}
                   of <span className="font-bold text-slate-800">{filteredDeals.length.toLocaleString()}</span>{' '}
-                  {pipelineFilter === 'UPWORK' ? (
-                    <span>Upwork deals <span className="text-slate-400 font-medium">({deals.length} total across all pipelines)</span></span>
+                  {pipelineFilter !== 'ALL' ? (
+                    <span>{getPipelineLabel(pipelineFilter)} deals <span className="text-slate-400 font-medium">({deals.length} total across all pipelines)</span></span>
                   ) : filteredDeals.length !== deals.length ? (
                     <span>filtered deals <span className="text-slate-400 font-medium">({deals.length} total in CRM)</span></span>
                   ) : (
