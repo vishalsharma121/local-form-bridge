@@ -480,15 +480,39 @@ export default async function handler(req, res) {
             }
 
             // Set HubSpot `deal_handled_by` on newly created deals
-            const isCreatorAdmin = auth.user?.role === 'super_admin' || auth.user?.role === 'super admin' || auth.user?.role === 'admin';
-            const creatorUid = auth.user?.userId || auth.user?.id || null;
-            const handlerIds = Array.isArray(req.body?.assigned_user_ids) && req.body.assigned_user_ids.length > 0
-                ? req.body.assigned_user_ids.map(Number).filter(Boolean)
-                : (assigned_user_id ? [Number(assigned_user_id)] : (!isCreatorAdmin && creatorUid ? [Number(creatorUid)] : []));
+            // By default, if any user (admin, super_admin, or team member) creates a deal,
+            // the deal is assigned to them unless other handlers were explicitly chosen.
+            const creatorUid = auth.user?.userId || auth.user?.id ? Number(auth.user?.userId || auth.user?.id) : null;
+            let handlerIds = [];
+            if (Array.isArray(req.body?.assigned_user_ids) && req.body.assigned_user_ids.length > 0) {
+                handlerIds = req.body.assigned_user_ids.map(Number).filter(Boolean);
+            } else if (req.body?.assigned_user_id) {
+                handlerIds = [Number(req.body.assigned_user_id)].filter(Boolean);
+            } else if (creatorUid) {
+                handlerIds = [creatorUid];
+            }
 
             const finalAssignedUserId = handlerIds[0] || null;
-            const finalAssignedTo = assigned_to || (!isCreatorAdmin ? userName : null);
-            const finalAssignedEmail = assigned_user_email || (!isCreatorAdmin ? userEmail : null);
+            let finalAssignedTo = assigned_to || null;
+            let finalAssignedEmail = assigned_user_email || null;
+
+            if (creatorUid && handlerIds.includes(creatorUid)) {
+                if (!finalAssignedTo) finalAssignedTo = userName;
+                if (!finalAssignedEmail) finalAssignedEmail = userEmail;
+            }
+
+            if (!finalAssignedTo && handlerIds.length > 0) {
+                try {
+                    const allUsers = await listUsers();
+                    const matched = allUsers.filter(u => handlerIds.includes(Number(u.id)));
+                    if (matched.length > 0) {
+                        finalAssignedTo = matched.map(u => u.name || u.email).join(', ');
+                        finalAssignedEmail = matched[0]?.email || null;
+                    }
+                } catch (uErr) {
+                    console.warn('⚠️ [API] Failed to resolve handler names:', uErr.message);
+                }
+            }
 
             if (handlerIds.length > 0) {
                 for (const hid of handlerIds) {
@@ -572,7 +596,7 @@ export default async function handler(req, res) {
 
             const dealId = dealData.id;
             console.log(`✅ [API] Deal created with ID: ${dealId}`);
-            await recordLeadSource(dealId, 'deal', 'Admin Dashboard', userName, auth.user?.userId, auth.user?.email);
+            await recordLeadSource(dealId, 'deal', 'Admin Dashboard', userName, creatorUid, userEmail);
             if (finalAssignedUserId) {
                 await assignDeal(dealId, finalAssignedUserId, finalAssignedTo, finalAssignedEmail, userName);
             }

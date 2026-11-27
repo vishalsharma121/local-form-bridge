@@ -62,7 +62,8 @@ export default function DealsView({
   onRefreshCompanies,
   adminKey
 }) {
-  const { getAuthHeaders, can, isSuperAdmin } = useAuth();
+  const { user, getAuthHeaders, can, isSuperAdmin } = useAuth();
+  const currentUserId = user?.id || user?.userId ? Number(user?.id || user?.userId) : null;
   const canCreate = can('create', 'deals');
   const canEdit = can('edit', 'deals');
   const canDelete = can('delete', 'deals');
@@ -748,8 +749,8 @@ export default function DealsView({
     amount: '',
     closedate: getDefaultCloseDate(),
     hubspot_owner_id: '',
-    assigned_user_id: '',
-    assigned_user_ids: [],
+    assigned_user_id: user?.id || user?.userId ? String(user?.id || user?.userId) : '',
+    assigned_user_ids: (user?.id || user?.userId) ? [Number(user?.id || user?.userId)] : [],
     deal_lead_source: [],
     dealtype: '',
     hs_priority: '',
@@ -762,6 +763,22 @@ export default function DealsView({
     lineItem: '',
     quantity: 0
   });
+
+  // Whenever the authenticated user is known/loaded, ensure newDealData defaults to the creator
+  useEffect(() => {
+    if (currentUserId) {
+      setNewDealData(prev => {
+        if (!prev.assigned_user_ids || prev.assigned_user_ids.length === 0) {
+          return {
+            ...prev,
+            assigned_user_id: String(currentUserId),
+            assigned_user_ids: [currentUserId]
+          };
+        }
+        return prev;
+      });
+    }
+  }, [currentUserId]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [createSuccessMsg, setCreateSuccessMsg] = useState('');
   const [createErrorMsg, setCreateErrorMsg] = useState('');
@@ -1066,8 +1083,8 @@ export default function DealsView({
       amount: '',
       closedate: getDefaultCloseDate(),
       hubspot_owner_id: '',
-      assigned_user_id: '',
-      assigned_user_ids: [],
+      assigned_user_id: currentUserId ? String(currentUserId) : '',
+      assigned_user_ids: currentUserId ? [currentUserId] : [],
       dealtype: '',
       hs_priority: '',
       contactId: '',
@@ -1090,6 +1107,21 @@ export default function DealsView({
     setIsQuickCreateCompanyOpen(false);
     setQuickCompanyError('');
     setQuickCompanyData({ name: '', domain: '' });
+  };
+
+  const handleOpenCreateModal = () => {
+    if (currentUserId) {
+      setNewDealData(prev => ({
+        ...prev,
+        assigned_user_id: (prev.assigned_user_ids && prev.assigned_user_ids.length > 0)
+          ? String(prev.assigned_user_ids[0])
+          : String(currentUserId),
+        assigned_user_ids: (prev.assigned_user_ids && prev.assigned_user_ids.length > 0)
+          ? prev.assigned_user_ids
+          : [currentUserId]
+      }));
+    }
+    setShowCreateModal(true);
   };
 
   const handleCreatePipelineChange = (newPipeId) => {
@@ -1224,8 +1256,8 @@ export default function DealsView({
           amount: '',
           closedate: getDefaultCloseDate(),
           hubspot_owner_id: '',
-          assigned_user_id: '',
-          assigned_user_ids: [],
+          assigned_user_id: currentUserId ? String(currentUserId) : '',
+          assigned_user_ids: currentUserId ? [currentUserId] : [],
           deal_lead_source: [],
           dealtype: '',
           hs_priority: '',
@@ -1373,7 +1405,7 @@ export default function DealsView({
 
           {canCreate && (
             <button
-              onClick={() => setShowCreateModal(true)}
+              onClick={handleOpenCreateModal}
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] hover:from-[#e58312] hover:to-[#d82417] text-white text-xs font-bold transition-all shadow-md shadow-orange-600/20 flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
             >
               <Plus className="w-4 h-4" />
@@ -1483,7 +1515,7 @@ export default function DealsView({
             </p>
             {canCreate && (
               <button
-                onClick={() => setShowCreateModal(true)}
+                onClick={handleOpenCreateModal}
                 className="px-4 py-2 rounded-2xl bg-gradient-to-r from-[#F7941D] to-[#EE3124] text-white text-xs font-bold shadow-md shadow-orange-600/20 cursor-pointer"
               >
                 + Create First Deal
