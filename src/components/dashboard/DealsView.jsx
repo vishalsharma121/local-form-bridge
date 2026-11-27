@@ -67,7 +67,7 @@ export default function DealsView({
   const canEdit = can('edit', 'deals');
   const canDelete = can('delete', 'deals');
   const [searchQuery, setSearchQuery] = useState('');
-  const [pipelineFilter, setPipelineFilter] = useState('UPWORK');
+  const [pipelineFilter, setPipelineFilter] = useState('ALL');
   const [stageFilter, setStageFilter] = useState('ALL');
   const [selectedSourceFilter, setSelectedSourceFilter] = useState('ALL');
   const [handlerFilter, setHandlerFilter] = useState('ALL');
@@ -1157,8 +1157,8 @@ export default function DealsView({
               }}
               className="bg-transparent text-slate-800 font-extrabold focus:outline-none cursor-pointer"
             >
-              <option value="UPWORK">Upwork Deals Only ({upworkDealsCount})</option>
               <option value="ALL">All Pipelines ({deals.length})</option>
+              <option value="UPWORK">Upwork Deals Only ({upworkDealsCount})</option>
               {activePipelines.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.label}
